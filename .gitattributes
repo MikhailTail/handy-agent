@@ -1,0 +1,17 @@
+# 统一换行符：仓库内一律存 LF。
+# 本项目在 Linux 构建机上构建，shell 脚本若被转成 CRLF 会直接执行失败。
+* text=auto eol=lf
+
+# Windows 批处理必须是 CRLF
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# 二进制文件不做换行转换
+*.jar binary
+*.jks binary
+*.keystore binary
+*.apk binary
+*.aab binary
+*.png binary
+*.webp binary
+*.jpg binary
