@@ -33,6 +33,7 @@ import dev.pocket.agent.platform.AppContainer
 import dev.pocket.agent.ui.chat.ApprovalDialog
 import dev.pocket.agent.ui.chat.ChatController
 import dev.pocket.agent.ui.chat.ChatScreen
+import dev.pocket.agent.ui.export.rememberExportHost
 import dev.pocket.agent.ui.files.FilesPane
 import dev.pocket.agent.ui.settings.SettingsPane
 import dev.pocket.agent.ui.terminal.TerminalPane
@@ -82,6 +83,10 @@ fun RootScaffold(
     }
     val runtime: AgentRuntime = container.runtime
 
+    // 导出入口挂在根页面：ActivityResult 的注册是全局按 key 的，若由各页面自己 remember，
+    // 切页会注销掉正在等用户挑保存位置的那次导出 —— 与审批卡同一套理由。
+    val exportHost = rememberExportHost()
+
     Scaffold(
         modifier = modifier.fillMaxSize(),
         bottomBar = {
@@ -105,7 +110,10 @@ fun RootScaffold(
                     onOpenSettings = { tab = Tab.SETTINGS },
                 )
 
-                Tab.FILES -> FilesPane(workspace = container.layout.workspace)
+                Tab.FILES -> FilesPane(
+                    workspace = container.layout.workspace,
+                    host = exportHost,
+                )
 
                 Tab.TERMINAL -> TerminalPane(
                     session = terminal,
