@@ -73,6 +73,8 @@ fun Application.handyModule(
     routing {
         healthRoutes()
         statusRoutes()
+        // 本平台做不到的接口要明确报错，不能让兜底的空对象骗过前端。
+        unsupportedRoutes()
         sessionsApi(projectsDir)
         settingsRoutes(configDir, permissionMode)
         modelsApi(configDir)
