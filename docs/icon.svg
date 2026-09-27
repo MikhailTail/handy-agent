@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Handy Agent 图标 —— 甲骨文「手」，三指即三点。
+
+  甲骨文的「手」本就是一只手的象形。这里让三个点直接当三根伸出的手指，
+  于是「点数」与「思考中」的双关重合，字形和含义长在一起，不靠外加装饰。
+  朱红印章底反白，末指用深色，在红底上留出那一点异色。
+
+  与 Android 版 res/drawable/ic_launcher.xml 字形一致（那份把
+  <line>/<circle>/<rect rx> 展开成了等价 path，因为 Vector Drawable 不支持它们）。
+-->
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 1024 1024">
+  <!-- 朱红印章底 -->
+  <rect x="88" y="88" width="848" height="848" rx="190" fill="#96442B"/>
+
+  <!-- 三根手指的连接线（指根 → 掌） -->
+  <g stroke="#F6F0E1" stroke-width="62" stroke-linecap="round">
+    <line x1="378" y1="404" x2="430" y2="520"/>
+    <line x1="512" y1="378" x2="512" y2="520"/>
+    <line x1="646" y1="404" x2="594" y2="520"/>
+  </g>
+
+  <!-- 三根指尖（中间最长）—— 这就是那「三个点」 -->
+  <circle cx="378" cy="352" r="58" fill="#F6F0E1"/>
+  <circle cx="512" cy="322" r="64" fill="#F6F0E1"/>
+  <circle cx="646" cy="352" r="58" fill="#2A1410"/>
+
+  <!-- 掌 -->
+  <path d="M330 560 Q512 500 694 560 Q728 730 512 790 Q296 730 330 560 Z"
+        fill="none" stroke="#F6F0E1" stroke-width="62" stroke-linejoin="round"/>
+
+  <!-- 腕 -->
+  <line x1="512" y1="788" x2="512" y2="878" stroke="#F6F0E1" stroke-width="62" stroke-linecap="round"/>
+</svg>
