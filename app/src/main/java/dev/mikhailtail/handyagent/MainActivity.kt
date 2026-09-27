@@ -1,5 +1,7 @@
 package dev.mikhailtail.handyagent
 
+import android.content.Intent
+import android.net.Uri
 import android.os.Bundle
 import android.webkit.WebView
 import android.webkit.WebViewClient
@@ -19,6 +21,7 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -49,6 +52,8 @@ class MainActivity : ComponentActivity() {
         storageGranted = StorageAccess.granted(this)
         val port = (application as HandyApp).serverPort
 
+        WebViewCompat.log(this)
+
         setContent {
             MaterialTheme {
                 Surface(modifier = Modifier.fillMaxSize()) {
@@ -57,7 +62,15 @@ class MainActivity : ComponentActivity() {
                             onOpenSettings = { StorageAccess.openSettings(this) },
                         )
 
-                        port > 0 -> HandyWebView(port = port)
+                        port > 0 -> Column {
+                            // WebView 太旧时界面会长得"像只做了前端"：布局高度塌陷，
+                            // 弹窗变成一条细白框、按钮点不着。**必须明确告诉用户去更新**，
+                            // 否则他会以为是 App 坏了。
+                            if (!WebViewCompat.isAdequate()) {
+                                WebViewOutdatedBanner(version = WebViewCompat.version())
+                            }
+                            HandyWebView(port = port)
+                        }
 
                         else -> CenterMessage("本地服务未能启动（端口 $port）")
                     }
@@ -143,6 +156,43 @@ private fun StorageGateScreen(onOpenSettings: () -> Unit) {
     }
 }
 
+/**
+ * WebView 过旧的提示条。
+ *
+ * 只说清"为什么界面会错乱"以及"去哪修"，不阻断使用 —— 有些页面仍能正常工作，
+ * 硬拦在门外反而更糟。
+ */
+@Composable
+private fun WebViewOutdatedBanner(version: String) {
+    val context = LocalContext.current
+    Surface(color = MaterialTheme.colorScheme.errorContainer) {
+        Column(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 10.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            Text(
+                "系统 WebView 版本过旧（$version）",
+                style = MaterialTheme.typography.labelLarge,
+                fontWeight = FontWeight.SemiBold,
+            )
+            Text(
+                "界面会错位、弹窗点不中 —— 请到应用商店更新「Android System WebView」后重开本应用。",
+                style = MaterialTheme.typography.bodySmall,
+            )
+            TextButton(
+                onClick = {
+                    runCatching {
+                        context.startActivity(
+                            Intent(Intent.ACTION_VIEW, Uri.parse("market://details?id=com.google.android.webview"))
+                                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                        )
+                    }
+                },
+            ) { Text("去更新") }
+        }
+    }
+}
+
 @Composable
 private fun CenterMessage(text: String) {
     Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -166,7 +216,13 @@ private fun HandyWebView(port: Int) {
                     mediaPlaybackRequiresUserGesture = false
                 }
                 // 必须装 WebViewClient，否则页面里的链接会被丢给系统浏览器打开。
-                webViewClient = WebViewClient()
+                webViewClient = object : WebViewClient() {
+                    override fun onPageStarted(view: WebView?, url: String?, favicon: android.graphics.Bitmap?) {
+                        super.onPageStarted(view, url, favicon)
+                        // 尽早注入兜底样式：等样式算完再补会先闪一下塌陷的布局。
+                        view?.let { WebViewCompat.install(it) }
+                    }
+                }
                 // 用 127.0.0.1 而不是 localhost：前端的同源判定拿的是
                 // window.location.origin，混用这两个字面量会被当成跨 origin。
                 loadUrl("http://127.0.0.1:$port/")
