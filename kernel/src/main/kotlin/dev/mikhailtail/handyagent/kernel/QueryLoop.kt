@@ -48,6 +48,19 @@ sealed interface EngineEvent {
     /** 整个用户回合结束（可能经过多轮工具调用）。 */
     data class RunComplete(val turns: Int) : EngineEvent
 
+    /**
+     * 上下文被压缩了。
+     *
+     * 必须让用户看见 —— 界面上要出现一条"对话已压缩"的边界提示。
+     * 悄悄丢掉历史会让人困惑："我刚才说的它怎么不记得了"。
+     */
+    data class Compacted(
+        val tokensBefore: Int,
+        val tokensAfter: Int,
+        val replacedMessages: Int,
+        val summary: String,
+    ) : EngineEvent
+
     data class Failure(val message: String, val retryable: Boolean) : EngineEvent
 }
 
@@ -71,17 +84,70 @@ class QueryEngine(
     private val permissions: PermissionPipeline? = null,
     private val toolContext: ToolContext? = null,
     private val maxTurns: Int = DEFAULT_MAX_TURNS,
+    /** 上下文压缩器。为空则不压缩（例如单轮测试）。 */
+    private val compactor: ContextCompactor? = null,
 ) {
 
     fun run(request: LlmRequest): Flow<EngineEvent> = flow {
         val messages = request.messages.toMutableList()
         val toolsByName = tools.associateBy { it.name }
         var turns = 0
+        var consecutiveCompactFailures = 0
+        // 上一轮 API 回传的真实 input_tokens。**决策优先用它而不是估算值**：
+        // 估算器在中文上高估了约 3.5 倍（实测 99000 估算 vs 28577 实际），
+        // 若拿估算值当判据，会在上下文远没满时就开始压缩 —— 每次压缩都是一次
+        // 真实的模型调用，白花钱还可能丢掉本不必丢的历史。
+        var lastRealInputTokens: Int? = null
 
         while (true) {
             turns++
+
+            // 每轮开始前检查是否需要压缩。放在这里而不是只在开头检查一次：
+            // 工具轮会把上下文推高（一次命令输出可能几万 token）。
+            val usedTokens = lastRealInputTokens ?: TokenEstimator.estimateAll(messages)
+            if (compactor != null && compactor.needed(usedTokens)) {
+                when (val result = runCatching { compactor.compact(request.model, messages, request.system) }
+                    .getOrNull()) {
+                    null -> {
+                        // 压缩失败不中止对话 —— 让这一轮先跑下去，下一轮再试。
+                        // 但连续失败要停手：在一个必然失败的压缩上反复烧钱没有意义。
+                        consecutiveCompactFailures++
+                        if (consecutiveCompactFailures >= CompactThresholds.MAX_CONSECUTIVE_FAILURES) {
+                            emit(
+                                EngineEvent.Failure(
+                                    "上下文压缩连续失败 $consecutiveCompactFailures 次，已停止重试。",
+                                    retryable = false,
+                                ),
+                            )
+                            return@flow
+                        }
+                    }
+
+                    else -> {
+                        consecutiveCompactFailures = 0
+                        messages.clear()
+                        messages.addAll(result.messages)
+                        emit(
+                            EngineEvent.Compacted(
+                                tokensBefore = result.tokensBefore,
+                                tokensAfter = result.tokensAfter,
+                                replacedMessages = result.replacedCount,
+                                summary = result.summary,
+                            ),
+                        )
+                    }
+                }
+            }
+
             // 失败路径已在 collectTurn 内部 emit 过失败事件并返回 null，这里直接收工。
             val turn = collectTurn(request, messages) ?: return@flow
+
+            // 记下这一轮的真实用量，供下一轮判断是否需要压缩。
+            turn.complete.usage?.let { usage ->
+                // input + cache 才是完整上下文；只算 input 会漏掉命中缓存的那部分，
+                // 于是"看起来还很空"，压缩永远不触发。
+                lastRealInputTokens = usage.inputTokens + (usage.cacheReadTokens ?: 0)
+            }
 
             emit(turn.complete)
 

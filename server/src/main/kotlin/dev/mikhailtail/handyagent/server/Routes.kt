@@ -91,14 +91,19 @@ internal fun Route.statusRoutes() {
  * **对话是从这里发起的**（`user_message`），不是 POST 到 `/chat` —— 那个接口只用来查状态。
  * 这一点看协议定义才确认，凭直觉很容易做错方向。
  */
-internal fun Route.frontendChannel(projectsDir: File, configDir: File, workDir: String) {
+internal fun Route.frontendChannel(
+    projectsDir: File,
+    configDir: File,
+    workDir: String,
+    contextWindow: Int,
+) {
     // 每轮对话是长任务（流式输出可能持续几十秒），必须与"收消息"的循环并发，
     // 否则一轮跑着的时候收到的 ping 都处理不了，前端会以为断线。
     val chatScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     webSocket("/ws/{sessionId}") {
         val sessionId = call.parameters["sessionId"].orEmpty()
-        val handler = ChatHandler(projectsDir, configDir, chatScope, workDir)
+        val handler = ChatHandler(projectsDir, configDir, chatScope, workDir, contextWindow)
 
         send(Frame.Text("""{"type":"connected","sessionId":"$sessionId"}"""))
         send(Frame.Text("""{"type":"session_state","turnState":"idle"}"""))

@@ -23,6 +23,8 @@ fun main(args: Array<String>) {
     // cc-haha 的配置目录：providers.json 在这里。
     val configDir = File(args.getOrElse(2) { "D:/cc-haha/cc-haha" })
     val port = args.getOrNull(3)?.toIntOrNull() ?: 3456
+    // 第 5 个参数可覆盖上下文窗口，用于验证压缩（真实模型窗口是 100 万，很难自然撑满）。
+    val contextWindow = args.getOrNull(4)?.toIntOrNull() ?: DEFAULT_CONTEXT_WINDOW
 
     require(staticRoot.isDirectory) { "静态目录不存在：${staticRoot.absolutePath}" }
 
@@ -30,6 +32,7 @@ fun main(args: Array<String>) {
         staticRoot = staticRoot,
         projectsDir = projectsDir,
         configDir = configDir,
+        contextWindow = contextWindow,
         port = port,
     ).start()
 
@@ -37,6 +40,7 @@ fun main(args: Array<String>) {
     println("projects ${projectsDir.absolutePath} (exists=${projectsDir.isDirectory})")
     println("config   ${configDir.absolutePath} (exists=${configDir.isDirectory})")
     println("provider ${loadActiveProvider(configDir)?.let { "${it.name} / ${it.model}" } ?: "未配置"}")
+    println("window   $contextWindow tokens")
     println("  http://127.0.0.1:$port/")
 
     Thread.currentThread().join()

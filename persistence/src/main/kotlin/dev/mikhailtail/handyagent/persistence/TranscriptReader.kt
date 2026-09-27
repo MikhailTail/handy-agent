@@ -78,6 +78,33 @@ class TranscriptReader(
         readLines(file).mapNotNull { it.toMessageEntry() }
 
     private fun TranscriptLine.toMessageEntry(): MessageEntry? {
+        // system 条目（压缩边界等）要放行 —— 它正是"对话被压缩过"的可见痕迹，
+        // 滤掉的话用户会觉得"我刚才说的它怎么不记得了"，却找不到任何解释。
+        // `system` 本来就是 MessageEntry.type 的合法取值之一。
+        if (type == "system") {
+            return MessageEntry(
+                id = uuid ?: "system-${timestamp.orEmpty()}-${subtype.orEmpty()}",
+                type = "system",
+                content = subtype?.let { s ->
+                    kotlinx.serialization.json.buildJsonArray {
+                        add(
+                            kotlinx.serialization.json.buildJsonObject {
+                                put("type", kotlinx.serialization.json.JsonPrimitive("text"))
+                                put("text", kotlinx.serialization.json.JsonPrimitive(text.orEmpty()))
+                            },
+                        )
+                    }
+                },
+                timestamp = timestamp,
+                parentUuid = null,
+                isSidechain = null,
+                cwd = cwd,
+                model = null,
+                usage = null,
+                usageKey = null,
+            )
+        }
+
         if (type != "user" && type != "assistant") return null
         val uuid = uuid ?: return null
 

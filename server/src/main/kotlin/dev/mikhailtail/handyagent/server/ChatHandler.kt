@@ -1,6 +1,8 @@
 package dev.mikhailtail.handyagent.server
 
 import dev.mikhailtail.handyagent.kernel.AnthropicLlmClient
+import dev.mikhailtail.handyagent.kernel.CompactThresholds
+import dev.mikhailtail.handyagent.kernel.ContextCompactor
 import dev.mikhailtail.handyagent.kernel.EngineEvent
 import dev.mikhailtail.handyagent.kernel.PermissionMode
 import dev.mikhailtail.handyagent.kernel.PermissionPipeline
@@ -40,6 +42,8 @@ class ChatHandler(
     private val scope: CoroutineScope,
     /** 工作目录 —— 工具解析相对路径的基准。 */
     private val workDir: String,
+    /** 模型的上下文窗口，决定压缩阈值。 */
+    private val contextWindow: Int = DEFAULT_CONTEXT_WINDOW,
 ) {
     private val scanner = SessionScanner(projectsDir)
     private val writer = TranscriptWriter()
@@ -128,15 +132,22 @@ class ChatHandler(
         // 阶段 3 的权限模式固定 default（每次写都问）。模式切换留到接 /api/permissions/mode 时做。
         val pipeline = PermissionPipeline(gate, PermissionMode.DEFAULT)
 
+        val llm = AnthropicLlmClient(
+            baseUrl = provider.baseUrl,
+            apiKey = provider.apiKey,
+            useBearerAuth = provider.useBearerAuth,
+        )
         val engine = QueryEngine(
-            llm = AnthropicLlmClient(
-                baseUrl = provider.baseUrl,
-                apiKey = provider.apiKey,
-                useBearerAuth = provider.useBearerAuth,
-            ),
+            llm = llm,
             tools = BUILTIN_TOOLS,
             permissions = pipeline,
             toolContext = toolContext,
+            // 窗口按模型的实际情况给。cc-haha 从 providers.json 的 modelContextWindows 读，
+            // 我们暂时用统一值 —— 读不到时宁可保守（小窗口），压得早总比撞 400 好。
+            compactor = ContextCompactor(
+                llm = llm,
+                thresholds = CompactThresholds.forWindow(contextWindow),
+            ),
         )
 
         var textAnnounced = false
@@ -206,6 +217,27 @@ class ChatHandler(
                     textAnnounced = false
                 }
 
+                is EngineEvent.Compacted -> {
+                    // 必须让用户看见 —— 悄悄丢掉历史会让人困惑："我刚才说的它怎么不记得了"。
+                    session.sendEvent(
+                        "system_notification",
+                        "subtype" to JsonPrimitive("compact_boundary"),
+                        "message" to JsonPrimitive(
+                            "对话已压缩：${event.replacedMessages} 条历史被摘要替代" +
+                                "（约 ${event.tokensBefore} → ${event.tokensAfter} tokens）",
+                        ),
+                    )
+                    // 同时落进转录，这样重开 App 也能看到这条边界。
+                    writer.appendSystemNote(
+                        file = transcript,
+                        sessionId = sessionId,
+                        subtype = "compact_boundary",
+                        text = event.summary,
+                        tokensBefore = event.tokensBefore,
+                        tokensAfter = event.tokensAfter,
+                    )
+                }
+
                 is EngineEvent.RunComplete -> {
                     session.sendStatus("idle")
                 }
@@ -258,6 +290,15 @@ class ChatHandler(
             ),
         )
 }
+
+/**
+ * 未知模型的上下文窗口默认值。
+ *
+ * 取 200k 是主流模型的常见量级；cc-haha 会从 `providers.json` 的 `modelContextWindows`
+ * 按模型精确读，我们暂时用统一值。**宁可保守**：估小了只会提早压缩（浪费一次调用），
+ * 估大了则是直接撞 API 的 400，对话卡死。
+ */
+internal const val DEFAULT_CONTEXT_WINDOW = 200_000
 
 private fun dev.mikhailtail.handyagent.kernel.api.TokenUsage.toWireUsage(): JsonElement =
     buildJsonObject {

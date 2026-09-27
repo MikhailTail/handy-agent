@@ -50,6 +50,12 @@ data class TranscriptLine(
 
     // ── ai-title ──────────────────────────────────────────────────────────
     val aiTitle: String? = null,
+
+    // ── system（压缩边界等）───────────────────────────────────────────────
+    val subtype: String? = null,
+    val text: String? = null,
+    val tokensBefore: Int? = null,
+    val tokensAfter: Int? = null,
 )
 
 /**

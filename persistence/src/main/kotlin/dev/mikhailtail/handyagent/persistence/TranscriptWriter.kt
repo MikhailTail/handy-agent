@@ -95,6 +95,34 @@ class TranscriptWriter(
         file.appendText(line.toString() + "\n")
     }
 
+    /**
+     * 追加一条系统备注（目前用于压缩边界）。
+     *
+     * 不参与 `parentUuid` 链 —— 它不是对话消息，只是给用户看的标记。
+     * 重开 App 后读转录时能重新看到"这里压缩过"。
+     */
+    fun appendSystemNote(
+        file: File,
+        sessionId: String,
+        subtype: String,
+        text: String,
+        tokensBefore: Int,
+        tokensAfter: Int,
+    ) {
+        val line = buildJsonObject {
+            put("type", JsonPrimitive("system"))
+            put("subtype", JsonPrimitive(subtype))
+            put("isMeta", JsonPrimitive(true))
+            put("text", JsonPrimitive(text))
+            put("tokensBefore", JsonPrimitive(tokensBefore))
+            put("tokensAfter", JsonPrimitive(tokensAfter))
+            put("timestamp", JsonPrimitive(Instant.now().toString()))
+            put("sessionId", JsonPrimitive(sessionId))
+        }
+        file.parentFile?.mkdirs()
+        file.appendText(line.toString() + "\n")
+    }
+
     /** 追加一条 `ai-title`（列表里显示的会话名）。 */
     fun appendAiTitle(file: File, title: String) {
         val line = buildJsonObject {
