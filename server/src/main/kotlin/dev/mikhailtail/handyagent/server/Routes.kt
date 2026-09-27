@@ -96,6 +96,7 @@ internal fun Route.frontendChannel(
     configDir: File,
     workDir: String,
     contextWindow: Int,
+    mobileProvider: () -> dev.mikhailtail.handyagent.kernel.api.MobileCapability?,
 ) {
     // 每轮对话是长任务（流式输出可能持续几十秒），必须与"收消息"的循环并发，
     // 否则一轮跑着的时候收到的 ping 都处理不了，前端会以为断线。
@@ -103,7 +104,7 @@ internal fun Route.frontendChannel(
 
     webSocket("/ws/{sessionId}") {
         val sessionId = call.parameters["sessionId"].orEmpty()
-        val handler = ChatHandler(projectsDir, configDir, chatScope, workDir, contextWindow)
+        val handler = ChatHandler(projectsDir, configDir, chatScope, workDir, contextWindow, mobileProvider)
 
         send(Frame.Text("""{"type":"connected","sessionId":"$sessionId"}"""))
         send(Frame.Text("""{"type":"session_state","turnState":"idle"}"""))

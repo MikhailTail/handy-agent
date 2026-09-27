@@ -44,6 +44,15 @@ class ChatHandler(
     private val workDir: String,
     /** 模型的上下文窗口，决定压缩阈值。 */
     private val contextWindow: Int = DEFAULT_CONTEXT_WINDOW,
+    /**
+     * 手机操作能力的提供者。
+     *
+     * **是 provider 而不是固定值**：无障碍服务由系统绑定，可能在 App 启动之后才连上，
+     * 也可能被用户中途关掉。每轮对话时求值，才能跟上它的真实状态。
+     * 返回 null 表示这台设备没有该能力（桌面开发机），此时**不注册手机工具** ——
+     * 免得模型看到一堆必然失败的工具，把每一步都浪费在试错上。
+     */
+    private val mobileProvider: () -> dev.mikhailtail.handyagent.kernel.api.MobileCapability? = { null },
 ) {
     private val scanner = SessionScanner(projectsDir)
     private val writer = TranscriptWriter()
@@ -127,6 +136,7 @@ class ChatHandler(
             override val files = RealFileHost()
             override val shell = ProcessShell()
             override val workDir: String = cwd
+            override val mobile get() = mobileProvider()
         }
 
         // 阶段 3 的权限模式固定 default（每次写都问）。模式切换留到接 /api/permissions/mode 时做。
@@ -139,7 +149,8 @@ class ChatHandler(
         )
         val engine = QueryEngine(
             llm = llm,
-            tools = BUILTIN_TOOLS,
+            // 手机能力可用时才挂上手机工具 —— 不可用时注册等于给模型挖坑。
+            tools = BUILTIN_TOOLS + (mobileProvider()?.let { dev.mikhailtail.handyagent.tools.MobileToolSet(it).tools() } ?: emptyList()),
             permissions = pipeline,
             toolContext = toolContext,
             // 窗口按模型的实际情况给。cc-haha 从 providers.json 的 modelContextWindows 读，

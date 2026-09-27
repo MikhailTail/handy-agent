@@ -33,6 +33,8 @@ class HandyServer(
     private val configDir: File,
     /** 模型上下文窗口，决定压缩阈值。 */
     private val contextWindow: Int = DEFAULT_CONTEXT_WINDOW,
+    /** 手机操作能力提供者；桌面开发机上恒为 null。 */
+    private val mobileProvider: () -> dev.mikhailtail.handyagent.kernel.api.MobileCapability? = { null },
     private val port: Int,
     private val host: String = "127.0.0.1",
 ) {
@@ -41,7 +43,7 @@ class HandyServer(
     fun start() {
         check(engine == null) { "HandyServer already started" }
         engine = embeddedServer(CIO, port = port, host = host) {
-            handyModule(staticRoot, projectsDir, configDir, contextWindow)
+            handyModule(staticRoot, projectsDir, configDir, contextWindow, mobileProvider)
         }.start(wait = false)
     }
 
@@ -60,6 +62,7 @@ fun Application.handyModule(
     projectsDir: File,
     configDir: File,
     contextWindow: Int = DEFAULT_CONTEXT_WINDOW,
+    mobileProvider: () -> dev.mikhailtail.handyagent.kernel.api.MobileCapability? = { null },
 ) {
     install(WebSockets)
     install(requestLogPlugin)
@@ -70,7 +73,9 @@ fun Application.handyModule(
         modelsApi(configDir)
         providerRoutes(configDir)
         // workDir 作为工具解析相对路径的基准（不是沙箱，只是 cwd 语义）。
-        frontendChannel(projectsDir, configDir, projectsDir.parentFile?.absolutePath.orEmpty(), contextWindow)
+        frontendChannel(
+            projectsDir, configDir, projectsDir.parentFile?.absolutePath.orEmpty(), contextWindow, mobileProvider,
+        )
         // 兜底必须排在静态之前：否则未实现的 /api 路径会掉进 SPA 兜底拿到一页 HTML，
         // 前端把它当 JSON 解析，报 "could not be parsed as JSON"，整屏进错误页。
         apiFallback()

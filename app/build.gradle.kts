@@ -80,6 +80,8 @@ android {
 dependencies {
     // 本地 HTTP+WS 服务端。纯 JVM 模块，逻辑可在电脑上直接跑测试。
     implementation(project(":server"))
+    // 无障碍服务实现 MobileCapability 契约（契约在 :kernel-api）。
+    implementation(project(":kernel-api"))
 
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3")
 

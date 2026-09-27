@@ -2,6 +2,7 @@ package dev.mikhailtail.handyagent
 
 import android.app.Application
 import android.util.Log
+import dev.mikhailtail.handyagent.mobile.MobileBridgeImpl
 import dev.mikhailtail.handyagent.server.HandyServer
 import java.io.File
 import java.net.ServerSocket
@@ -41,6 +42,9 @@ class HandyApp : Application() {
             staticRoot = staticRoot,
             projectsDir = projectsDir,
             configDir = configDir,
+            // 无障碍服务由系统绑定，可能在启动之后才连上、也可能被用户中途关掉 ——
+            // 传 provider 而不是当时的值，才能跟上它的真实状态。
+            mobileProvider = { MobileBridgeImpl.capability },
             port = port,
         ).start()
         serverPort = port

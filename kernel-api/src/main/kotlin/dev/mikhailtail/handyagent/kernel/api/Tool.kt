@@ -66,6 +66,15 @@ interface Tool {
 data class ToolResult(
     val content: JsonElement,
     val isError: Boolean = false,
+    /**
+     * 随结果一起回给模型的图片（JPEG base64，不带 data: 前缀）。
+     *
+     * 手机操作工具必须能给截图 —— 只给控件树的话，模型看不见图标、图片、颜色，
+     * 以及那些没有语义标签却需要点的区域。
+     *
+     * 用 base64 而不是文件路径：模型没法"打开"路径，图片必须以内容形式进上下文。
+     */
+    val images: List<String> = emptyList(),
 )
 
 /**
@@ -77,8 +86,13 @@ data class ToolResult(
 interface ToolContext {
     val files: FileHost
     val shell: ShellHost
-    /** 工作目录（沙箱内的路径），工具用它解析相对路径。 */
+    /** 工作目录，工具用它解析相对路径。 */
     val workDir: String
+    /**
+     * 手机操作能力。**为 null 表示该平台没有这个能力**（桌面开发机上就是 null），
+     * 此时手机工具不该被注册 —— 免得模型看到一堆必然失败的工具。
+     */
+    val mobile: MobileCapability? get() = null
 }
 
 /**

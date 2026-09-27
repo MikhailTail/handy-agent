@@ -44,18 +44,27 @@
         </activity>
 
         <!--
-          阶段 5 会在这里加回两块声明（现在加会因为类不存在而编译失败）：
+          无障碍服务 —— mobile use 的唯一能力来源。
 
-          1. platform.mobile.HandyAccessibilityService —— mobile use 的唯一能力来源。
-             照 cc-haha 的 CodexComputerEngine 走语义路径（listApps/getAppState/
-             click(index)/setValue/scroll/pressKey），与 Android 的
-             AccessibilityNodeInfo 一一对应，不要去模仿 Windows 那套像素坐标。
-             必须由用户在「设置 → 无障碍」手动开启；Android 13+ 侧载包还需先
-             「允许受限设置」。
+          走的是**语义路径**（按控件序号操作），对应 cc-haha 的 macOS 实现
+          （AX 元素句柄），而不是 Windows 那套像素坐标。Android 的
+          AccessibilityNodeInfo 天然属于前者。
 
-          2. FileProvider —— 导出文件的分享出口，只授权 cacheDir/exports/
-             （见 res/xml/file_paths.xml）。
+          必须由用户在「设置 → 无障碍」手动开启；Android 13+ 侧载包还需先
+          「允许受限设置」。开启之前工具的调用会被拒绝并提示用户，不会静默失败。
         -->
+        <service
+            android:name=".mobile.MobileBridgeImpl"
+            android:exported="true"
+            android:label="@string/accessibility_service_label"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.accessibilityservice"
+                android:resource="@xml/accessibility_service_config" />
+        </service>
     </application>
 
 </manifest>
