@@ -6,7 +6,10 @@
 *.bat text eol=crlf
 *.cmd text eol=crlf
 
-# 二进制文件不做换行转换
+# 二进制文件不做换行转换。
+#
+# 字体必须在这里：`* text=auto eol=lf` 会把 .woff2/.ttf 也当文本转换换行符，
+# 直接损坏字形数据 —— 症状是字体整块不生效且不报错，极难定位到 git 这一层。
 *.jar binary
 *.jks binary
 *.keystore binary
@@ -15,3 +18,12 @@
 *.png binary
 *.webp binary
 *.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.svgz binary
+*.woff binary
+*.woff2 binary
+*.ttf binary
+*.otf binary
+*.eot binary
