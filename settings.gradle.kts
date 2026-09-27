@@ -26,3 +26,5 @@ rootProject.name = "handy-agent"
 // 能在电脑上直接跑单测，不必动模拟器 —— 这是移植期最重要的生产力来源。
 include(":app")
 include(":server")
+// 转录与设置的落盘层：JSONL 是真源，索引可重建。
+include(":persistence")

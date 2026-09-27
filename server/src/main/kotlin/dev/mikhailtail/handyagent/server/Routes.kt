@@ -71,19 +71,7 @@ internal fun Route.statusRoutes() {
     }
 }
 
-/**
- * `/api/sessions` —— 阶段 0 恒为空数组。
- *
- * 真实实现要等 :persistence 落地（JSONL 转录扫描），在此之前返回空数组比返回
- * 404 好：前端拿到 `[]` 会正常渲染"还没有会话"，拿到 404 则可能进错误分支。
- */
-internal fun Route.sessionRoutes() {
-    route("/api/sessions") {
-        get {
-            call.respondJson("[]")
-        }
-    }
-}
+// `/api/sessions` 及其子路由见 SessionRoutes.kt（阶段 1 起接真实转录）。
 
 /**
  * `/ws/{sessionId}` —— 前端的事件通道。

@@ -31,7 +31,7 @@ class RoutingTest {
 
     @Test
     fun `health returns ok`() = testApplication {
-        application { handyModule(tempStaticRoot()) }
+        application { handyModule(tempStaticRoot(), java.io.File("D:/cc-haha/projects")) }
 
         val res = client.get("/health")
 
@@ -42,7 +42,7 @@ class RoutingTest {
     /** 字段名对齐 `src/server/api/status.ts` 的 handleHealthCheck()。 */
     @Test
     fun `api status carries status version uptime`() = testApplication {
-        application { handyModule(tempStaticRoot()) }
+        application { handyModule(tempStaticRoot(), java.io.File("D:/cc-haha/projects")) }
 
         val res = client.get("/api/status")
 
@@ -56,7 +56,7 @@ class RoutingTest {
     /** 字段名对齐 handleUser()：{ configDir, projects }。 */
     @Test
     fun `api status user carries configDir and projects`() = testApplication {
-        application { handyModule(tempStaticRoot()) }
+        application { handyModule(tempStaticRoot(), java.io.File("D:/cc-haha/projects")) }
 
         val res = client.get("/api/status/user")
 
@@ -68,7 +68,7 @@ class RoutingTest {
 
     @Test
     fun `api status usage carries token counters`() = testApplication {
-        application { handyModule(tempStaticRoot()) }
+        application { handyModule(tempStaticRoot(), java.io.File("D:/cc-haha/projects")) }
 
         val res = client.get("/api/status/usage")
 
@@ -79,20 +79,27 @@ class RoutingTest {
         assertTrue(body.contains("totalCost"), body)
     }
 
-    /** 前端把 sessions 当数组消费，返回 `[]` 才会渲染"还没有会话"而不是进错误分支。 */
+    /**
+     * `/api/sessions` 顶层是**对象**不是数组（会话在 `sessions` 键下），
+     * 且带 `total` 与 `index` —— 这条是拿活的 cc-haha 服务实测出来的，不是照类型定义猜的。
+     */
     @Test
-    fun `api sessions returns empty array`() = testApplication {
-        application { handyModule(tempStaticRoot()) }
+    fun `api sessions returns an object with sessions total and index`() = testApplication {
+        application { handyModule(tempStaticRoot(), java.io.File("D:/cc-haha/projects")) }
 
         val res = client.get("/api/sessions")
 
         assertEquals(HttpStatusCode.OK, res.status)
-        assertEquals("[]", res.bodyAsText().trim())
+        val body = res.bodyAsText()
+        assertTrue(body.trimStart().startsWith("{"), "顶层应是对象，实际：${body.take(120)}")
+        assertTrue(body.contains("\"sessions\""), body.take(200))
+        assertTrue(body.contains("\"total\""), body.take(200))
+        assertTrue(body.contains("\"index\""), body.take(200))
     }
 
     @Test
     fun `root serves the frontend index`() = testApplication {
-        application { handyModule(tempStaticRoot()) }
+        application { handyModule(tempStaticRoot(), java.io.File("D:/cc-haha/projects")) }
 
         val res = client.get("/")
 
@@ -102,7 +109,7 @@ class RoutingTest {
 
     @Test
     fun `static assets are served from disk`() = testApplication {
-        application { handyModule(tempStaticRoot()) }
+        application { handyModule(tempStaticRoot(), java.io.File("D:/cc-haha/projects")) }
 
         val res = client.get("/assets/app.js")
 
@@ -116,7 +123,7 @@ class RoutingTest {
      */
     @Test
     fun `unknown path falls back to index for client side routing`() = testApplication {
-        application { handyModule(tempStaticRoot()) }
+        application { handyModule(tempStaticRoot(), java.io.File("D:/cc-haha/projects")) }
 
         val res = client.get("/settings")
 
@@ -133,7 +140,7 @@ class RoutingTest {
      */
     @Test
     fun `unimplemented api path degrades to empty json object`() = testApplication {
-        application { handyModule(tempStaticRoot()) }
+        application { handyModule(tempStaticRoot(), java.io.File("D:/cc-haha/projects")) }
 
         val res = client.get("/api/models")
 
@@ -144,7 +151,7 @@ class RoutingTest {
     /** 同一道兜底要覆盖写方法，否则前端 POST 一个未实现端点又会拿到 HTML。 */
     @Test
     fun `unimplemented api post also degrades to json`() = testApplication {
-        application { handyModule(tempStaticRoot()) }
+        application { handyModule(tempStaticRoot(), java.io.File("D:/cc-haha/projects")) }
 
         val res = client.post("/api/diagnostics/events") {
             setBody("{}")
@@ -157,7 +164,7 @@ class RoutingTest {
     /** 已实现的具体路由不能被兜底抢走。 */
     @Test
     fun `concrete api routes still win over the fallback`() = testApplication {
-        application { handyModule(tempStaticRoot()) }
+        application { handyModule(tempStaticRoot(), java.io.File("D:/cc-haha/projects")) }
 
         assertEquals(HttpStatusCode.OK, client.get("/api/status").status)
         assertEquals(HttpStatusCode.OK, client.get("/api/sessions").status)

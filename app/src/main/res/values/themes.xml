@@ -1,8 +1,21 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <style name="Theme.Handy" parent="android:Theme.Material.NoActionBar">
-        <item name="android:statusBarColor">#101418</item>
-        <item name="android:navigationBarColor">#101418</item>
-        <item name="android:windowBackground">#101418</item>
+    <!--
+      必须是 Light 变体。
+
+      WebView 会把宿主的 `isLightTheme` 透给页面的 `prefers-color-scheme`，而
+      cc-haha 前端的启动脚本在"新安装且未显式选过主题"时会跟随系统 —— 宿主报
+      dark，它就选墨夜（#201D17），整个界面偏暗。
+
+      这里原本是 `android:Theme.Material.NoActionBar`（**深色**变体），恰好踩中。
+      改成 Light 之后页面拿到 `color-scheme: light`，cc-haha 用它自己的默认浅色。
+
+      颜色对齐前端的 `white` 主题（#FFFFFF）：WebView 的背景与 windowBackground
+      一致，冷启动时才不会先闪一下深色再变白。
+    -->
+    <style name="Theme.Handy" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:statusBarColor">#FFFFFF</item>
+        <item name="android:navigationBarColor">#FFFFFF</item>
+        <item name="android:windowBackground">#FFFFFF</item>
     </style>
 </resources>

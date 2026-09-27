@@ -22,11 +22,15 @@ kotlin {
 }
 
 dependencies {
+    implementation(project(":persistence"))
+
     // Ktor 2.3.x 是 Kotlin 1.9 对应的稳定线。
     // CIO 引擎是纯 Kotlin 实现，Android 上可以直接跑，不需要 Netty/Java EE。
     implementation("io.ktor:ktor-server-core:2.3.12")
     implementation("io.ktor:ktor-server-cio:2.3.12")
     implementation("io.ktor:ktor-server-websockets:2.3.12")
+    // 响应体里要原样透传转录里的 JsonElement，手拼字符串既易错又会破坏转义。
+    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.6.3")
 
     testImplementation(kotlin("test"))
     testImplementation("io.ktor:ktor-server-test-host:2.3.12")
