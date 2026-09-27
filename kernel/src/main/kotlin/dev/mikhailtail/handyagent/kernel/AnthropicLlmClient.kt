@@ -74,6 +74,9 @@ class AnthropicLlmClient(
         put("stream", JsonPrimitive(true))
         request.system?.let { put("system", JsonPrimitive(it)) }
         request.temperature?.let { put("temperature", JsonPrimitive(it)) }
+        // 字段名必须是 snake_case 的 input_schema（在 toolsToApiSchema 里组装）；
+        // 写成 camelCase 会被端点静默忽略，表现为"模型从不调用工具"。
+        request.tools?.let { put("tools", it) }
         put("messages", kotlinx.serialization.json.JsonArray(request.messages))
     }.toString()
 

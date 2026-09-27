@@ -17,6 +17,8 @@ data class LlmRequest(
     val messages: List<JsonElement>,
     val maxTokens: Int = 8192,
     val temperature: Double? = null,
+    /** 工具定义（Anthropic 的 `tools` 数组）。为空时不带该字段。 */
+    val tools: JsonElement? = null,
 )
 
 /**

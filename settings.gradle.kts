@@ -32,3 +32,5 @@ include(":persistence")
 // 两者都不含 android.*，于是能拿脚本化模型在电脑上直接跑单测。
 include(":kernel-api")
 include(":kernel")
+// 内置工具实现（Read/Write/Edit/Glob/Grep/Bash）。同样纯 JVM。
+include(":kernel-tools")

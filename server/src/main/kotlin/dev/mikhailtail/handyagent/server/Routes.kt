@@ -91,29 +91,39 @@ internal fun Route.statusRoutes() {
  * **对话是从这里发起的**（`user_message`），不是 POST 到 `/chat` —— 那个接口只用来查状态。
  * 这一点看协议定义才确认，凭直觉很容易做错方向。
  */
-internal fun Route.frontendChannel(projectsDir: File, configDir: File) {
+internal fun Route.frontendChannel(projectsDir: File, configDir: File, workDir: String) {
     // 每轮对话是长任务（流式输出可能持续几十秒），必须与"收消息"的循环并发，
     // 否则一轮跑着的时候收到的 ping 都处理不了，前端会以为断线。
     val chatScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     webSocket("/ws/{sessionId}") {
         val sessionId = call.parameters["sessionId"].orEmpty()
-        val handler = ChatHandler(projectsDir, configDir, chatScope)
+        val handler = ChatHandler(projectsDir, configDir, chatScope, workDir)
 
         send(Frame.Text("""{"type":"connected","sessionId":"$sessionId"}"""))
         send(Frame.Text("""{"type":"session_state","turnState":"idle"}"""))
 
-        for (frame in incoming) {
-            if (frame !is Frame.Text) continue
-            val text = frame.readText()
-            val payload = runCatching { Json.parseToJsonElement(text).jsonObject }.getOrNull() ?: continue
-            when (payload["type"]?.jsonPrimitive?.contentOrNull()) {
-                // 前端每 30s 发一次 ping 保活；不回 pong 会被判为断线并触发重连。
-                "ping" -> send(Frame.Text("""{"type":"pong"}"""))
-                "user_message" -> handler.onUserMessage(sessionId, this, payload)
-                "stop_generation" -> handler.onStop(sessionId)
-                "sync_state" -> send(Frame.Text("""{"type":"session_state","turnState":"idle"}"""))
+        try {
+            for (frame in incoming) {
+                if (frame !is Frame.Text) continue
+                val payload = runCatching { Json.parseToJsonElement(frame.readText()).jsonObject }
+                    .getOrNull() ?: continue
+                when (payload["type"]?.jsonPrimitive?.contentOrNull()) {
+                    // 前端每 30s 发一次 ping 保活；不回 pong 会被判为断线并触发重连。
+                    "ping" -> send(Frame.Text("""{"type":"pong"}"""))
+                    "user_message" -> handler.onUserMessage(sessionId, this, payload)
+                    "stop_generation" -> handler.onStop(sessionId)
+                    "sync_state" -> send(Frame.Text("""{"type":"session_state","turnState":"idle"}"""))
+                    "permission_response" -> handler.onPermissionResponse(
+                        sessionId = sessionId,
+                        requestId = payload["requestId"]?.jsonPrimitive?.contentOrNull().orEmpty(),
+                        allowed = payload["allowed"]?.jsonPrimitive?.contentOrNull() == "true",
+                    )
+                }
             }
+        } finally {
+            // 连接断了要把等待审批的协程唤醒，否则它们会一直挂在超时上。
+            handler.onDisconnect(sessionId)
         }
     }
 }

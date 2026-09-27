@@ -30,11 +30,23 @@ class HandyApp : Application() {
             version = BuildConfig.VERSION_NAME,
         )
 
+        // 手机上有自己的数据目录，与桌面 cc-haha 的互不相干：
+        // 转录和 provider 配置都落在应用私有空间里，卸载即清除，不会被其他 App 读到。
+        val projectsDir = File(filesDir, "projects")
+        val configDir = File(filesDir, "config")
+        configDir.mkdirs()
+
         val port = pickLoopbackPort()
-        HandyServer(staticRoot = staticRoot, port = port).start()
+        HandyServer(
+            staticRoot = staticRoot,
+            projectsDir = projectsDir,
+            configDir = configDir,
+            port = port,
+        ).start()
         serverPort = port
 
-        Log.i(TAG, "local server listening on http://127.0.0.1:$port/ (static: $staticRoot)")
+        Log.i(TAG, "local server listening on http://127.0.0.1:$port/")
+        Log.i(TAG, "  static=$staticRoot projects=$projectsDir config=$configDir")
     }
 
     /**

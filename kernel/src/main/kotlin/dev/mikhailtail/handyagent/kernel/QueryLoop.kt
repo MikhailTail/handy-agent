@@ -2,29 +2,41 @@ package dev.mikhailtail.handyagent.kernel
 
 import dev.mikhailtail.handyagent.kernel.api.LlmClient
 import dev.mikhailtail.handyagent.kernel.api.LlmEvent
+import dev.mikhailtail.handyagent.kernel.api.LlmException
 import dev.mikhailtail.handyagent.kernel.api.LlmRequest
 import dev.mikhailtail.handyagent.kernel.api.TokenUsage
+import dev.mikhailtail.handyagent.kernel.api.Tool
+import dev.mikhailtail.handyagent.kernel.api.ToolContext
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
+import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
+import java.util.UUID
 
 /**
  * 内核对外发出的事件。
- *
- * 前三个是 [LlmEvent] 的直通，[TurnComplete] 是内核补的：一轮结束后要把"这一轮产生了
- * 什么"交给上层去落盘，而单看流事件是拼不出完整消息的（文本散在多个 delta 里，
- * 工具参数是分片 JSON）。
  */
 sealed interface EngineEvent {
     data class TextDelta(val text: String) : EngineEvent
     data class ThinkingDelta(val text: String) : EngineEvent
+
+    /** 模型开始调用某个工具（参数还在流式传输中）。 */
     data class ToolUseStart(val id: String, val name: String) : EngineEvent
+
+    /** 工具已执行完，带结果。[isError] 用于界面上标红。 */
+    data class ToolFinished(
+        val id: String,
+        val name: String,
+        val output: String,
+        val isError: Boolean,
+    ) : EngineEvent
 
     /** 一轮结束。[assistantMessage] 是要写进转录的完整 assistant 消息。 */
     data class TurnComplete(
@@ -33,51 +45,121 @@ sealed interface EngineEvent {
         val stopReason: String?,
     ) : EngineEvent
 
-    /** 出错。[retryable] 由 `LlmException` 判定（429/5xx/网络错误可重试）。 */
+    /** 整个用户回合结束（可能经过多轮工具调用）。 */
+    data class RunComplete(val turns: Int) : EngineEvent
+
     data class Failure(val message: String, val retryable: Boolean) : EngineEvent
 }
 
 /**
- * Agent 的主循环 —— 对应 cc-haha 的 `src/query.ts` 里的 `queryLoop`。
+ * Agent 主循环 —— 对应 cc-haha 的 `src/query.ts` 里的 `queryLoop`。
  *
  * **退出信号是本轮有没有出现 `tool_use` 块，不是 `stop_reason`。**
- * cc-haha 在源码里明确写了这一点（注释大意：stop_reason 不可靠），我们照搬这条判断。
- * 原因很实际：不同厂商的兼容实现在这点上不一致，有的即使返回了 tool_use 也把
- * stop_reason 报成 `end_turn`，有的相反。以"有没有工具要调"为准，语义最稳。
+ * cc-haha 源码里明确记了这一点：不同厂商的兼容实现在 stop_reason 上不一致
+ * （有的返回了 tool_use 却报 end_turn），以"有没有工具要调"为准语义最稳。
  *
- * 阶段 2 只跑**单轮**（没有工具注册，所以第一轮必然没有 tool_use）。
- * 阶段 3 接上工具后，`while` 才是完整的 —— 结构先摆在这里，避免那时改形状。
+ * 每一轮的形状：
+ * ```
+ * 调模型 → 收到 assistant（可能含 tool_use）
+ *   ├─ 没有 tool_use → 结束整个回合
+ *   └─ 有 tool_use   → 逐个审批+执行 → 把 assistant 与 tool_result 追加进上下文 → 下一轮
+ * ```
  */
-class QueryEngine(private val llm: LlmClient) {
+class QueryEngine(
+    private val llm: LlmClient,
+    private val tools: List<Tool> = emptyList(),
+    private val permissions: PermissionPipeline? = null,
+    private val toolContext: ToolContext? = null,
+    private val maxTurns: Int = DEFAULT_MAX_TURNS,
+) {
 
     fun run(request: LlmRequest): Flow<EngineEvent> = flow {
-        val textBuf = StringBuilder()
-        val thinkingBuf = StringBuilder()
-        val toolUses = mutableListOf<ToolUseAccumulator>()
+        val messages = request.messages.toMutableList()
+        val toolsByName = tools.associateBy { it.name }
+        var turns = 0
+
+        while (true) {
+            turns++
+            // 失败路径已在 collectTurn 内部 emit 过失败事件并返回 null，这里直接收工。
+            val turn = collectTurn(request, messages) ?: return@flow
+
+            emit(turn.complete)
+
+            val calls = turn.toolCalls
+            if (calls.isEmpty()) {
+                // 本轮没有工具调用 → 整个回合结束。这就是退出信号。
+                emit(EngineEvent.RunComplete(turns))
+                return@flow
+            }
+
+            if (turns >= maxTurns) {
+                emit(
+                    EngineEvent.Failure(
+                        "已达到单回合最大工具轮数（$maxTurns），停止以免失控",
+                        retryable = false,
+                    ),
+                )
+                return@flow
+            }
+
+            // 助手这轮说了什么，原样进上下文（含 tool_use 块，tool_result 要与它配对）。
+            messages += turn.assistantMessage
+
+            val results = buildJsonArray {
+                for (call in calls) {
+                    val outcome = executeToolCall(call, toolsByName)
+                    emit(EngineEvent.ToolFinished(call.id, call.name, outcome.text, outcome.isError))
+                    add(
+                        buildJsonObject {
+                            put("type", JsonPrimitive("tool_result"))
+                            put("tool_use_id", JsonPrimitive(call.id))
+                            put("content", JsonPrimitive(outcome.text))
+                            if (outcome.isError) put("is_error", JsonPrimitive(true))
+                        },
+                    )
+                }
+            }
+
+            // 所有结果合成**一条 user 消息**：Anthropic 要求每个 tool_use 都有对应的
+            // tool_result，且必须在下一条 user 消息里 —— 拆成多条会被 400 拒掉。
+            messages += buildJsonObject {
+                put("role", JsonPrimitive("user"))
+                put("content", results)
+            }
+        }
+    }
+
+    /** 跑一轮模型：把流事件发出去，同时攒出完整的 assistant 消息与工具调用。 */
+    private suspend fun kotlinx.coroutines.flow.FlowCollector<EngineEvent>.collectTurn(
+        request: LlmRequest,
+        messages: List<JsonElement>,
+    ): TurnResult? {
+        val text = StringBuilder()
+        val thinking = StringBuilder()
+        val calls = mutableListOf<ToolCall>()
         var usage: TokenUsage? = null
         var stopReason: String? = null
 
         try {
-            llm.stream(request).collect { event ->
+            llm.stream(request.copy(messages = messages)).collect { event ->
                 when (event) {
                     is LlmEvent.TextDelta -> {
-                        textBuf.append(event.text)
+                        text.append(event.text)
                         emit(EngineEvent.TextDelta(event.text))
                     }
 
                     is LlmEvent.ThinkingDelta -> {
-                        thinkingBuf.append(event.text)
+                        thinking.append(event.text)
                         emit(EngineEvent.ThinkingDelta(event.text))
                     }
 
                     is LlmEvent.ToolUseStart -> {
-                        toolUses += ToolUseAccumulator(event.id, event.name)
+                        calls += ToolCall(event.id, event.name, StringBuilder())
                         emit(EngineEvent.ToolUseStart(event.id, event.name))
                     }
 
-                    // 工具参数是分片 JSON，必须攒齐再解析 —— 中途的每个分片都不是合法 JSON。
-                    is LlmEvent.ToolInputDelta ->
-                        toolUses.lastOrNull()?.json?.append(event.partialJson)
+                    // 参数是分片 JSON，中途任何一片单独都不是合法 JSON，必须攒齐再解析。
+                    is LlmEvent.ToolInputDelta -> calls.lastOrNull()?.json?.append(event.partialJson)
 
                     is LlmEvent.MessageStop -> {
                         usage = event.usage
@@ -85,37 +167,86 @@ class QueryEngine(private val llm: LlmClient) {
                     }
                 }
             }
-        } catch (e: dev.mikhailtail.handyagent.kernel.api.LlmException) {
+        } catch (e: LlmException) {
             emit(EngineEvent.Failure(e.message ?: "模型调用失败", e.retryable))
-            return@flow
+            return null
         }
 
-        emit(
-            EngineEvent.TurnComplete(
-                assistantMessage = buildAssistantMessage(textBuf, thinkingBuf, toolUses),
-                usage = usage,
-                stopReason = stopReason,
-            ),
+        val assistant = buildAssistantMessage(text, thinking, calls)
+        return TurnResult(
+            assistantMessage = assistant,
+            complete = EngineEvent.TurnComplete(assistant, usage, stopReason),
+            toolCalls = calls,
         )
+    }
+
+    private suspend fun executeToolCall(call: ToolCall, toolsByName: Map<String, Tool>): ToolOutcome {
+        val tool = toolsByName[call.name]
+            ?: return ToolOutcome("未知工具：${call.name}", isError = true)
+
+        val input = call.parsedInput()
+
+        val pipeline = permissions
+        val ctx = toolContext
+        if (pipeline != null && ctx != null) {
+            val decision = pipeline.authorize(tool, input, UUID.randomUUID().toString())
+            if (decision is ApprovalDecision.Denied) {
+                // 拒绝也要回 tool_result —— 不回的话模型会以为工具卡住了，反复重试同一个调用。
+                return ToolOutcome("用户拒绝了这次调用：${decision.message}", isError = true)
+            }
+        }
+
+        if (ctx == null) return ToolOutcome("工具上下文未就绪", isError = true)
+
+        return runCatching { tool.execute(input, ctx) }
+            .fold(
+                onSuccess = { ToolOutcome(it.content.toPlainText(), it.isError) },
+                onFailure = { ToolOutcome("工具执行异常：${it.message}", isError = true) },
+            )
     }
 }
 
-private class ToolUseAccumulator(val id: String, val name: String) {
-    val json = StringBuilder()
+private class TurnResult(
+    val assistantMessage: JsonElement,
+    val complete: EngineEvent.TurnComplete,
+    val toolCalls: List<ToolCall>,
+)
+
+private class ToolCall(val id: String, val name: String, val json: StringBuilder) {
+    fun parsedInput(): JsonObject =
+        if (json.isEmpty()) {
+            JsonObject(emptyMap())
+        } else {
+            runCatching { Json.parseToJsonElement(json.toString()) as? JsonObject }
+                .getOrNull() ?: JsonObject(emptyMap())
+        }
+}
+
+private data class ToolOutcome(val text: String, val isError: Boolean)
+
+/**
+ * 把 tool_result 的内容压成纯文本。
+ *
+ * Anthropic 允许 content 是 block 数组，但工具结果在这里都是人/模型可读的文本，
+ * 转一次让转录与事件流都简单。将来有返回图片的工具（如截图）再扩展。
+ */
+private fun JsonElement.toPlainText(): String = when (this) {
+    is JsonPrimitive -> content
+    is JsonArray -> joinToString("\n") { it.toPlainText() }
+    is JsonObject -> toString()
+    else -> toString()
 }
 
 /**
  * 组装要写进转录的 assistant 消息。
  *
- * 形态必须与 cc-haha 落盘的一致：`{ "role": "assistant", "content": [ ...blocks ] }`。
- * 转录是**双方共用**的 —— cc-haha 也要能读回我们写的文件，所以这里不能自创格式。
- *
- * block 的排放顺序按 cc-haha 的习惯：thinking → text → tool_use。
+ * 形态必须与 cc-haha 落盘的一致（`{role, content:[...blocks]}`）—— 转录是双方共用的，
+ * 桌面端也要能读回。block 顺序按 cc-haha 的习惯：thinking → text → tool_use。
  */
 private fun buildAssistantMessage(
     text: StringBuilder,
     thinking: StringBuilder,
-    toolUses: List<ToolUseAccumulator>,
+    calls: List<ToolCall>,
 ): JsonElement = buildJsonObject {
     put("role", JsonPrimitive("assistant"))
     put(
@@ -137,27 +268,21 @@ private fun buildAssistantMessage(
                     },
                 )
             }
-            for (tool in toolUses) {
+            for (call in calls) {
                 add(
                     buildJsonObject {
                         put("type", JsonPrimitive("tool_use"))
-                        put("id", JsonPrimitive(tool.id))
-                        put("name", JsonPrimitive(tool.name))
-                        // 参数可能因为上游中断而没攒完；解析不出来时给空对象，
+                        put("id", JsonPrimitive(call.id))
+                        put("name", JsonPrimitive(call.name))
+                        // 参数可能因上游中断而没攒完；解析不出就给空对象，
                         // 让转录保持可读而不是整行作废。
-                        put("input", tool.json.toString().toJsonOrEmptyObject())
+                        put("input", call.parsedInput())
                     },
                 )
             }
         },
     )
 }
-
-private fun String.toJsonOrEmptyObject(): JsonElement =
-    if (isBlank()) JsonObject(emptyMap())
-    else runCatching {
-        kotlinx.serialization.json.Json.parseToJsonElement(this)
-    }.getOrElse { JsonObject(emptyMap()) }
 
 /** 便利：把文本包成一条 user 消息（Anthropic Messages API 的形态）。 */
 fun userTextMessage(text: String): JsonElement = buildJsonObject {
@@ -174,3 +299,5 @@ fun userTextMessage(text: String): JsonElement = buildJsonObject {
         },
     )
 }
+
+const val DEFAULT_MAX_TURNS = 40

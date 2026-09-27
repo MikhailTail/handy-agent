@@ -24,9 +24,21 @@ import kotlin.test.assertTrue
  */
 class QueryEngineTest {
 
-    /** 按脚本吐事件的假模型。 */
-    private class ScriptedLlm(private val script: List<LlmEvent>) : LlmClient {
+    /**
+     * 按脚本吐事件的假模型。
+     *
+     * **必须支持多轮脚本**：主循环是 `while`，只要模型还会调工具就会继续下一轮。
+     * 若假体每轮都吐同一份脚本，工具执行完又会收到同样的 tool_use，于是转到
+     * `maxTurns` 才停 —— 表现为"TurnComplete 出现了好多次"。真实模型会看着
+     * tool_result 调整，假体得把这个性质补上才不会带偏测试。
+     *
+     * 脚本用完后返回空轮（自然的"没有 tool_use"），于是循环正常结束。
+     */
+    private class ScriptedLlm(vararg val turns: List<LlmEvent>) : LlmClient {
+        private var call = 0
         override fun stream(request: LlmRequest): Flow<LlmEvent> = flow {
+            val script = turns.getOrElse(call) { emptyList() }
+            call++
             script.forEach { emit(it) }
         }
     }
@@ -57,7 +69,7 @@ class QueryEngineTest {
             events.filterIsInstance<EngineEvent.TextDelta>().map { it.text },
         )
 
-        val done = events.filterIsInstance<EngineEvent.TurnComplete>().single()
+        val done = events.filterIsInstance<EngineEvent.TurnComplete>().first()
         val content = done.assistantMessage.jsonObject["content"]!!.jsonArray
         assertEquals("text", content[0].jsonObject["type"]!!.jsonPrimitive.content)
         assertEquals("你好", content[0].jsonObject["text"]!!.jsonPrimitive.content)
@@ -78,7 +90,7 @@ class QueryEngineTest {
         )
 
         val blocks = engine.run(req()).toList()
-            .filterIsInstance<EngineEvent.TurnComplete>().single()
+            .filterIsInstance<EngineEvent.TurnComplete>().first()
             .assistantMessage.jsonObject["content"]!!.jsonArray
 
         // 顺序按 cc-haha 的习惯：thinking 在 text 之前。
@@ -107,7 +119,7 @@ class QueryEngineTest {
         )
 
         val tool = engine.run(req()).toList()
-            .filterIsInstance<EngineEvent.TurnComplete>().single()
+            .filterIsInstance<EngineEvent.TurnComplete>().first()
             .assistantMessage.jsonObject["content"]!!.jsonArray
             .single { it.jsonObject["type"]!!.jsonPrimitive.content == "tool_use" }
 
@@ -130,7 +142,7 @@ class QueryEngineTest {
         )
 
         val tool = engine.run(req()).toList()
-            .filterIsInstance<EngineEvent.TurnComplete>().single()
+            .filterIsInstance<EngineEvent.TurnComplete>().first()
             .assistantMessage.jsonObject["content"]!!.jsonArray
             .single()
 

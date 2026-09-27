@@ -24,6 +24,7 @@ kotlin {
 dependencies {
     implementation(project(":persistence"))
     implementation(project(":kernel"))
+    implementation(project(":kernel-tools"))
 
     // Ktor 2.3.x 是 Kotlin 1.9 对应的稳定线。
     // CIO 引擎是纯 Kotlin 实现，Android 上可以直接跑，不需要 Netty/Java EE。

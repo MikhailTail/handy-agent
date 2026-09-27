@@ -61,7 +61,8 @@ fun Application.handyModule(staticRoot: File, projectsDir: File, configDir: File
         statusRoutes()
         sessionsApi(projectsDir)
         modelsApi(configDir)
-        frontendChannel(projectsDir, configDir)
+        // workDir 作为工具解析相对路径的基准（不是沙箱，只是 cwd 语义）。
+        frontendChannel(projectsDir, configDir, projectsDir.parentFile?.absolutePath.orEmpty())
         // 兜底必须排在静态之前：否则未实现的 /api 路径会掉进 SPA 兜底拿到一页 HTML，
         // 前端把它当 JSON 解析，报 "could not be parsed as JSON"，整屏进错误页。
         apiFallback()
