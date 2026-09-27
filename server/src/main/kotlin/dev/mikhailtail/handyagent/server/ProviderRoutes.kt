@@ -134,14 +134,66 @@ internal fun Route.providerRoutes(configDir: File) {
             call.respondJsonRaw("""{"ok":true}""")
         }
 
-        // 阶段 4 会真正实现（拉取远端模型列表 / 连通性测试）。
-        // 现在如实返回一个明确的失败，而不是伪造成功 —— 假的"测试通过"会让人以为配置没问题。
+        /**
+         * 探测某个 baseUrl + apiKey 能列出哪些模型。
+         *
+         * **这是设置页"填完 key 点一下拉取模型"那一步，缺了它添加供应商的流程走不完。**
+         * 注意它接受的是**表单里当前填的值**而不是已保存的 provider —— 用户还没保存。
+         */
+        post("/models") {
+            val input = call.receiveJson()
+                ?: return@post call.respondJsonRaw("""{"ok":false,"errorCode":"missing-config","message":"请求体不是合法 JSON","endpointsTried":[]}""")
+
+            val baseUrl = input["baseUrl"]?.asString().orEmpty()
+            val apiKey = input["apiKey"]?.asString().orEmpty()
+            // 表单里通常有"认证方式"选择；没给就按 auth_token（Bearer）试，
+            // 那是 DeepSeek 这类兼容端点的常见做法。
+            val useBearer = input["authStrategy"]?.asString() != "api_key"
+
+            try {
+                call.respondJsonRaw(ProviderModelsProbe.probe(baseUrl, apiKey, useBearer).toString())
+            } catch (e: Exception) {
+                // 探测自身出意外也要按契约回 200 + ok:false，否则前端会以为后端挂了。
+                call.respondJsonRaw(
+                    """{"ok":false,"errorCode":"unknown","message":${escapeJson(e.message ?: "探测失败")},"endpointsTried":[]}""",
+                )
+            }
+        }
+
+        /**
+         * 连通性测试。
+         *
+         * 如实返回"尚未实现"，不伪造成功 —— 假的"测试通过"会让人以为配置没问题，
+         * 然后在真正对话时撞墙，反而更难查。
+         */
         post("/{id}/test") {
             call.respondJsonRaw(
-                """{"ok":false,"message":"连通性测试尚未实现，请先保存后在对话中验证"}""",
+                """{"ok":false,"message":"连通性测试尚未实现。可以先保存，再用「拉取模型列表」验证配置是否正确。"}""",
+            )
+        }
+
+        post("/test") {
+            call.respondJsonRaw(
+                """{"ok":false,"message":"连通性测试尚未实现。可以先用「拉取模型列表」验证配置。"}""",
             )
         }
     }
+}
+
+/** 极简 JSON 字符串转义 —— 只为把异常信息安全地塞进手拼的响应里。 */
+private fun escapeJson(s: String): String = buildString {
+    append('"')
+    for (c in s) {
+        when (c) {
+            '"' -> append("\\\"")
+            '\\' -> append("\\\\")
+            '\n' -> append("\\n")
+            '\r' -> append("\\r")
+            '\t' -> append("\\t")
+            else -> if (c.code < 0x20) append("\\u%04x".format(c.code)) else append(c)
+        }
+    }
+    append('"')
 }
 
 // ─── 读写 ─────────────────────────────────────────────────────────────────────

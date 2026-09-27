@@ -97,6 +97,7 @@ internal fun Route.frontendChannel(
     workDir: String,
     contextWindow: Int,
     mobileProvider: () -> dev.mikhailtail.handyagent.kernel.api.MobileCapability?,
+    permissionMode: PermissionModeHolder,
 ) {
     // 每轮对话是长任务（流式输出可能持续几十秒），必须与"收消息"的循环并发，
     // 否则一轮跑着的时候收到的 ping 都处理不了，前端会以为断线。
@@ -104,7 +105,7 @@ internal fun Route.frontendChannel(
 
     webSocket("/ws/{sessionId}") {
         val sessionId = call.parameters["sessionId"].orEmpty()
-        val handler = ChatHandler(projectsDir, configDir, chatScope, workDir, contextWindow, mobileProvider)
+        val handler = ChatHandler(projectsDir, configDir, chatScope, workDir, contextWindow, mobileProvider, permissionMode)
 
         send(Frame.Text("""{"type":"connected","sessionId":"$sessionId"}"""))
         send(Frame.Text("""{"type":"session_state","turnState":"idle"}"""))
@@ -165,14 +166,49 @@ internal fun Route.apiFallback() {
         // Ktor 2.3 的 handler receiver 是 PipelineContext（RoutingContext 是 3.x 的 API）。
         val degraded: suspend PipelineContext<Unit, ApplicationCall>.(Unit) -> Unit = {
             val path = call.request.path()
-            println("[degraded] ${call.request.httpMethod.value} $path -> {}")
-            call.respondText("{}", ContentType.Application.Json, HttpStatusCode.OK)
+            val body = emptyShapeFor(path)
+            println("[degraded] ${call.request.httpMethod.value} $path -> $body")
+            call.respondText(body, ContentType.Application.Json, HttpStatusCode.OK)
         }
         get(degraded)
         post(degraded)
         put(degraded)
         patch(degraded)
         delete(degraded)
+    }
+}
+
+/**
+ * 未实现路径的**空形态**。
+ *
+ * 一律返回 `{}` 是不够的 —— 前端有一大批接口按数组消费（`/api/teams`、`/api/adapters`、
+ * `/api/skills`…），拿到对象会在 `.map` 上直接抛错，整个页面白屏。
+ * 这类"看起来有界面、一点就崩"的现象，根因往往就在这里。
+ *
+ * 名单按前端 api 目录下各文件的实际用法整理。**判断依据是"前端把它当数组还是对象"**，
+ * 不是接口的语义 —— 语义上像列表但前端当对象用的，要跟着前端走。
+ */
+private fun emptyShapeFor(path: String): String {
+    val p = path.trimEnd('/')
+    val listLike = listOf(
+        "/api/adapters", "/api/agents", "/api/connectors", "/api/mcp", "/api/plugins",
+        "/api/skills", "/api/teams", "/api/workflows", "/api/tasks", "/api/tasks/lists",
+        "/api/scheduled-tasks", "/api/traces", "/api/public-access", "/api/market/skills",
+        "/api/session-collaboration", "/api/computer-use/apps",
+        "/api/computer-use/authorized-apps", "/api/open-targets",
+        "/api/sessions/recent-projects", "/api/sessions/project-history",
+    )
+    if (listLike.any { p == it || p.startsWith("$it/") }) return "[]"
+
+    // 少数接口前端直接读顶层字段，给个带键的空对象比裸 `{}` 更安全。
+    return when {
+        p.startsWith("/api/diagnostics") -> """{"events":[],"status":"ok"}"""
+        p == "/api/models" -> """{"models":[],"provider":null}"""
+        p == "/api/models/current" -> """{"model":null}"""
+        p == "/api/permissions/mode" -> """{"mode":"default"}"""
+        p == "/api/filesystem/browse" -> """{"entries":[],"path":""}"""
+        p == "/api/search/sessions" -> """{"results":[],"total":0}"""
+        else -> "{}"
     }
 }
 

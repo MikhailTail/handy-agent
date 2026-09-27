@@ -142,11 +142,29 @@ class RoutingTest {
     fun `unimplemented api path degrades to empty json object`() = testApplication {
         application { handyModule(tempStaticRoot(), java.io.File("D:/cc-haha/projects"), java.io.File("D:/cc-haha/cc-haha")) }
 
-        // 用一个确实没实现的端点（/api/models 在阶段 2 已经实现了）。
-        val res = client.get("/api/scheduled-tasks")
+        // 用一个确实没实现的**对象型**端点。
+        val res = client.get("/api/memory/file")
 
         assertEquals(HttpStatusCode.OK, res.status)
-        assertEquals("{}", res.bodyAsText().trim())
+        assertTrue(res.bodyAsText().trimStart().startsWith("{"), res.bodyAsText())
+    }
+
+    /**
+     * 未实现的**列表型**接口要返回 `[]` 而不是 `{}`。
+     *
+     * 前端有一大批接口按数组消费（`/api/teams`、`/api/skills`…），拿到对象会在
+     * `.map` 上直接抛错、整页白屏。这类"看起来有界面、一点就崩"的现象，根因就在这里 ——
+     * 用户报"感觉只做了前端"时，第一处该查的就是这条。
+     */
+    @Test
+    fun `unimplemented list endpoints degrade to an empty array`() = testApplication {
+        application { handyModule(tempStaticRoot(), java.io.File("D:/cc-haha/projects"), java.io.File("D:/cc-haha/cc-haha")) }
+
+        for (path in listOf("/api/teams", "/api/adapters", "/api/skills", "/api/scheduled-tasks")) {
+            val res = client.get(path)
+            assertEquals(HttpStatusCode.OK, res.status, path)
+            assertEquals("[]", res.bodyAsText().trim(), "$path 应返回空数组")
+        }
     }
 
     /**
@@ -175,7 +193,7 @@ class RoutingTest {
         }
 
         assertEquals(HttpStatusCode.OK, res.status)
-        assertEquals("{}", res.bodyAsText().trim())
+        assertTrue(res.bodyAsText().trimStart().startsWith("{"), res.bodyAsText())
     }
 
     /** 已实现的具体路由不能被兜底抢走。 */

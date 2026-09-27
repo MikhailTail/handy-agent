@@ -53,6 +53,8 @@ class ChatHandler(
      * 免得模型看到一堆必然失败的工具，把每一步都浪费在试错上。
      */
     private val mobileProvider: () -> dev.mikhailtail.handyagent.kernel.api.MobileCapability? = { null },
+    /** 权限模式由设置接口写、这里读，切换立即生效。 */
+    private val permissionMode: PermissionModeHolder = PermissionModeHolder(),
 ) {
     private val scanner = SessionScanner(projectsDir)
     private val writer = TranscriptWriter()
@@ -139,8 +141,8 @@ class ChatHandler(
             override val mobile get() = mobileProvider()
         }
 
-        // 阶段 3 的权限模式固定 default（每次写都问）。模式切换留到接 /api/permissions/mode 时做。
-        val pipeline = PermissionPipeline(gate, PermissionMode.DEFAULT)
+        // 每轮按当前模式新建管线：用户在界面上切了模式，下一轮就该按新强度执行。
+        val pipeline = PermissionPipeline(gate, PermissionMode.fromWire(permissionMode.mode))
 
         val llm = AnthropicLlmClient(
             baseUrl = provider.baseUrl,

@@ -38,12 +38,15 @@ class HandyServer(
     private val port: Int,
     private val host: String = "127.0.0.1",
 ) {
+    /** 权限模式的单一真源：设置接口写、权限管线读，切换立即生效。 */
+    private val permissionMode = PermissionModeHolder()
+
     private var engine: ApplicationEngine? = null
 
     fun start() {
         check(engine == null) { "HandyServer already started" }
         engine = embeddedServer(CIO, port = port, host = host) {
-            handyModule(staticRoot, projectsDir, configDir, contextWindow, mobileProvider)
+            handyModule(staticRoot, projectsDir, configDir, contextWindow, mobileProvider, permissionMode)
         }.start(wait = false)
     }
 
@@ -63,6 +66,7 @@ fun Application.handyModule(
     configDir: File,
     contextWindow: Int = DEFAULT_CONTEXT_WINDOW,
     mobileProvider: () -> dev.mikhailtail.handyagent.kernel.api.MobileCapability? = { null },
+    permissionMode: PermissionModeHolder = PermissionModeHolder(),
 ) {
     install(WebSockets)
     install(requestLogPlugin)
@@ -70,11 +74,12 @@ fun Application.handyModule(
         healthRoutes()
         statusRoutes()
         sessionsApi(projectsDir)
+        settingsRoutes(configDir, permissionMode)
         modelsApi(configDir)
         providerRoutes(configDir)
         // workDir 作为工具解析相对路径的基准（不是沙箱，只是 cwd 语义）。
         frontendChannel(
-            projectsDir, configDir, projectsDir.parentFile?.absolutePath.orEmpty(), contextWindow, mobileProvider,
+            projectsDir, configDir, projectsDir.parentFile?.absolutePath.orEmpty(), contextWindow, mobileProvider, permissionMode,
         )
         // 兜底必须排在静态之前：否则未实现的 /api 路径会掉进 SPA 兜底拿到一页 HTML，
         // 前端把它当 JSON 解析，报 "could not be parsed as JSON"，整屏进错误页。
