@@ -9,6 +9,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -23,6 +24,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -47,6 +49,9 @@ class MainActivity : ComponentActivity() {
     /** 全盘文件访问是否已授权。用 state 是为了从设置返回时能即时刷新界面。 */
     private var storageGranted by mutableStateOf(true)
 
+    /** 捕获到的 JS 报错数量。有错时界面顶部给出可复制的诊断入口。 */
+    private var jsErrorCount by mutableStateOf(0)
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         storageGranted = StorageAccess.granted(this)
@@ -69,7 +74,10 @@ class MainActivity : ComponentActivity() {
                             if (!WebViewCompat.isAdequate()) {
                                 WebViewOutdatedBanner(version = WebViewCompat.version())
                             }
-                            HandyWebView(port = port)
+                            HandyWebView(port = port, onJsError = { jsErrorCount = it })
+                            if (jsErrorCount > 0) {
+                                JsErrorPanel(count = jsErrorCount)
+                            }
                         }
 
                         else -> CenterMessage("本地服务未能启动（端口 $port）")
@@ -193,6 +201,66 @@ private fun WebViewOutdatedBanner(version: String) {
     }
 }
 
+/**
+ * JS 报错浮层。
+ *
+ * 前端是原版产物不能改，它在手机上出错时只弹一句 toast —— 连调用栈都没有，
+ * 而在开发机上同样的操作一切正常，无从复现。这里把捕获到的完整信息摆出来，
+ * 给一个"复制"按钮：用户把内容发回来，就能定位到是哪个模块出的问题。
+ */
+@Composable
+private fun JsErrorPanel(count: Int) {
+    val context = LocalContext.current
+    var expanded by remember { mutableStateOf(false) }
+    val details = remember(count) { JsErrorReporter.snapshot() }
+
+    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.BottomCenter) {
+        Surface(
+            color = MaterialTheme.colorScheme.errorContainer,
+            modifier = Modifier.fillMaxWidth().padding(8.dp),
+        ) {
+            Column(
+                modifier = Modifier.padding(12.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                Text(
+                    "界面报错 ×$count",
+                    style = MaterialTheme.typography.labelLarge,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                if (expanded) {
+                    Column(
+                        modifier = Modifier.verticalScroll(rememberScrollState()),
+                        verticalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
+                        details.forEach { line ->
+                            Text(line, style = MaterialTheme.typography.bodySmall)
+                        }
+                    }
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    TextButton(onClick = { expanded = !expanded }) {
+                        Text(if (expanded) "收起" else "展开")
+                    }
+                    TextButton(
+                        onClick = {
+                            val cm = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE)
+                                as android.content.ClipboardManager
+                            cm.setPrimaryClip(
+                                android.content.ClipData.newPlainText(
+                                    "handy-agent-errors",
+                                    details.joinToString("\n"),
+                                ),
+                            )
+                        },
+                    ) { Text("复制") }
+                    TextButton(onClick = { JsErrorReporter.clear() }) { Text("清除") }
+                }
+            }
+        }
+    }
+}
+
 @Composable
 private fun CenterMessage(text: String) {
     Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -201,7 +269,7 @@ private fun CenterMessage(text: String) {
 }
 
 @Composable
-private fun HandyWebView(port: Int) {
+private fun HandyWebView(port: Int, onJsError: (Int) -> Unit = {}) {
     AndroidView(
         modifier = Modifier.fillMaxSize(),
         factory = { context ->
@@ -214,6 +282,15 @@ private fun HandyWebView(port: Int) {
                     allowFileAccess = false
                     allowContentAccess = false
                     mediaPlaybackRequiresUserGesture = false
+                }
+                webChromeClient = object : android.webkit.WebChromeClient() {
+                    override fun onConsoleMessage(msg: android.webkit.ConsoleMessage): Boolean {
+                        JsErrorReporter.record(msg)
+                        if (msg.messageLevel() == android.webkit.ConsoleMessage.MessageLevel.ERROR) {
+                            onJsError(JsErrorReporter.snapshot().size)
+                        }
+                        return false
+                    }
                 }
                 // 必须装 WebViewClient，否则页面里的链接会被丢给系统浏览器打开。
                 webViewClient = object : WebViewClient() {
