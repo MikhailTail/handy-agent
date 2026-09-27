@@ -22,7 +22,16 @@ import io.ktor.server.websocket.webSocket
 import io.ktor.websocket.Frame
 import io.ktor.websocket.readText
 import io.ktor.websocket.send
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import java.io.File
+
+private val json = Json { ignoreUnknownKeys = true; isLenient = true }
 
 /** 与 cc-haha `src/server/api/status.ts` 的 `getVersion()` 回退值保持一致。 */
 private const val SERVER_VERSION = "999.0.0-local"
@@ -77,18 +86,33 @@ internal fun Route.statusRoutes() {
  * `/ws/{sessionId}` —— 前端的事件通道。
  *
  * cc-haha 用的是自定义 JSON 事件（不是 JSON-RPC），见 `desktop/src/api/websocket.ts`
- * 与 `desktop/src/types/chat.ts`。阶段 0 只需连得上、ping 有 pong、断开不炸；
- * 真正的 `content_delta` / `permission_request` 等事件在阶段 2 接入内核后才有内容。
+ * 与 `desktop/src/types/chat.ts`。
+ *
+ * **对话是从这里发起的**（`user_message`），不是 POST 到 `/chat` —— 那个接口只用来查状态。
+ * 这一点看协议定义才确认，凭直觉很容易做错方向。
  */
-internal fun Route.frontendChannel() {
+internal fun Route.frontendChannel(projectsDir: File, configDir: File) {
+    // 每轮对话是长任务（流式输出可能持续几十秒），必须与"收消息"的循环并发，
+    // 否则一轮跑着的时候收到的 ping 都处理不了，前端会以为断线。
+    val chatScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
     webSocket("/ws/{sessionId}") {
         val sessionId = call.parameters["sessionId"].orEmpty()
+        val handler = ChatHandler(projectsDir, configDir, chatScope)
+
         send(Frame.Text("""{"type":"connected","sessionId":"$sessionId"}"""))
+        send(Frame.Text("""{"type":"session_state","turnState":"idle"}"""))
+
         for (frame in incoming) {
             if (frame !is Frame.Text) continue
-            // 前端每 30s 发一次 ping 保活；不回 pong 会被判为断线并触发重连。
-            if (frame.readText().contains("\"ping\"")) {
-                send(Frame.Text("""{"type":"pong"}"""))
+            val text = frame.readText()
+            val payload = runCatching { Json.parseToJsonElement(text).jsonObject }.getOrNull() ?: continue
+            when (payload["type"]?.jsonPrimitive?.contentOrNull()) {
+                // 前端每 30s 发一次 ping 保活；不回 pong 会被判为断线并触发重连。
+                "ping" -> send(Frame.Text("""{"type":"pong"}"""))
+                "user_message" -> handler.onUserMessage(sessionId, this, payload)
+                "stop_generation" -> handler.onStop(sessionId)
+                "sync_state" -> send(Frame.Text("""{"type":"session_state","turnState":"idle"}"""))
             }
         }
     }

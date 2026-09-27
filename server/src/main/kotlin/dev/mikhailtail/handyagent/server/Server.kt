@@ -29,6 +29,8 @@ import java.io.File
 class HandyServer(
     private val staticRoot: File,
     private val projectsDir: File,
+    /** cc-haha 的配置目录（含 providers.json）。 */
+    private val configDir: File,
     private val port: Int,
     private val host: String = "127.0.0.1",
 ) {
@@ -37,7 +39,7 @@ class HandyServer(
     fun start() {
         check(engine == null) { "HandyServer already started" }
         engine = embeddedServer(CIO, port = port, host = host) {
-            handyModule(staticRoot, projectsDir)
+            handyModule(staticRoot, projectsDir, configDir)
         }.start(wait = false)
     }
 
@@ -51,14 +53,15 @@ class HandyServer(
  * 路由装配。做成 `Application` 的扩展而不是塞进 [HandyServer]，是为了让测试能
  * `testApplication { application { handyModule(dir) } }` 直接挂载，不必真的占端口。
  */
-fun Application.handyModule(staticRoot: File, projectsDir: File) {
+fun Application.handyModule(staticRoot: File, projectsDir: File, configDir: File) {
     install(WebSockets)
     install(requestLogPlugin)
     routing {
         healthRoutes()
         statusRoutes()
         sessionsApi(projectsDir)
-        frontendChannel()
+        modelsApi(configDir)
+        frontendChannel(projectsDir, configDir)
         // 兜底必须排在静态之前：否则未实现的 /api 路径会掉进 SPA 兜底拿到一页 HTML，
         // 前端把它当 JSON 解析，报 "could not be parsed as JSON"，整屏进错误页。
         apiFallback()

@@ -31,7 +31,7 @@ class RoutingTest {
 
     @Test
     fun `health returns ok`() = testApplication {
-        application { handyModule(tempStaticRoot(), java.io.File("D:/cc-haha/projects")) }
+        application { handyModule(tempStaticRoot(), java.io.File("D:/cc-haha/projects"), java.io.File("D:/cc-haha/cc-haha")) }
 
         val res = client.get("/health")
 
@@ -42,7 +42,7 @@ class RoutingTest {
     /** 字段名对齐 `src/server/api/status.ts` 的 handleHealthCheck()。 */
     @Test
     fun `api status carries status version uptime`() = testApplication {
-        application { handyModule(tempStaticRoot(), java.io.File("D:/cc-haha/projects")) }
+        application { handyModule(tempStaticRoot(), java.io.File("D:/cc-haha/projects"), java.io.File("D:/cc-haha/cc-haha")) }
 
         val res = client.get("/api/status")
 
@@ -56,7 +56,7 @@ class RoutingTest {
     /** 字段名对齐 handleUser()：{ configDir, projects }。 */
     @Test
     fun `api status user carries configDir and projects`() = testApplication {
-        application { handyModule(tempStaticRoot(), java.io.File("D:/cc-haha/projects")) }
+        application { handyModule(tempStaticRoot(), java.io.File("D:/cc-haha/projects"), java.io.File("D:/cc-haha/cc-haha")) }
 
         val res = client.get("/api/status/user")
 
@@ -68,7 +68,7 @@ class RoutingTest {
 
     @Test
     fun `api status usage carries token counters`() = testApplication {
-        application { handyModule(tempStaticRoot(), java.io.File("D:/cc-haha/projects")) }
+        application { handyModule(tempStaticRoot(), java.io.File("D:/cc-haha/projects"), java.io.File("D:/cc-haha/cc-haha")) }
 
         val res = client.get("/api/status/usage")
 
@@ -85,7 +85,7 @@ class RoutingTest {
      */
     @Test
     fun `api sessions returns an object with sessions total and index`() = testApplication {
-        application { handyModule(tempStaticRoot(), java.io.File("D:/cc-haha/projects")) }
+        application { handyModule(tempStaticRoot(), java.io.File("D:/cc-haha/projects"), java.io.File("D:/cc-haha/cc-haha")) }
 
         val res = client.get("/api/sessions")
 
@@ -99,7 +99,7 @@ class RoutingTest {
 
     @Test
     fun `root serves the frontend index`() = testApplication {
-        application { handyModule(tempStaticRoot(), java.io.File("D:/cc-haha/projects")) }
+        application { handyModule(tempStaticRoot(), java.io.File("D:/cc-haha/projects"), java.io.File("D:/cc-haha/cc-haha")) }
 
         val res = client.get("/")
 
@@ -109,7 +109,7 @@ class RoutingTest {
 
     @Test
     fun `static assets are served from disk`() = testApplication {
-        application { handyModule(tempStaticRoot(), java.io.File("D:/cc-haha/projects")) }
+        application { handyModule(tempStaticRoot(), java.io.File("D:/cc-haha/projects"), java.io.File("D:/cc-haha/cc-haha")) }
 
         val res = client.get("/assets/app.js")
 
@@ -123,7 +123,7 @@ class RoutingTest {
      */
     @Test
     fun `unknown path falls back to index for client side routing`() = testApplication {
-        application { handyModule(tempStaticRoot(), java.io.File("D:/cc-haha/projects")) }
+        application { handyModule(tempStaticRoot(), java.io.File("D:/cc-haha/projects"), java.io.File("D:/cc-haha/cc-haha")) }
 
         val res = client.get("/settings")
 
@@ -140,18 +140,35 @@ class RoutingTest {
      */
     @Test
     fun `unimplemented api path degrades to empty json object`() = testApplication {
-        application { handyModule(tempStaticRoot(), java.io.File("D:/cc-haha/projects")) }
+        application { handyModule(tempStaticRoot(), java.io.File("D:/cc-haha/projects"), java.io.File("D:/cc-haha/cc-haha")) }
 
-        val res = client.get("/api/models")
+        // 用一个确实没实现的端点（/api/models 在阶段 2 已经实现了）。
+        val res = client.get("/api/scheduled-tasks")
 
         assertEquals(HttpStatusCode.OK, res.status)
         assertEquals("{}", res.bodyAsText().trim())
     }
 
+    /**
+     * `/api/models` 的 `models` 是**对象数组**不是字符串数组 ——
+     * 写错前端不会报错，只是模型选择器空着，属于典型静默失败。
+     */
+    @Test
+    fun `api models returns provider and model objects`() = testApplication {
+        application { handyModule(tempStaticRoot(), java.io.File("D:/cc-haha/projects"), java.io.File("D:/cc-haha/cc-haha")) }
+
+        val res = client.get("/api/models")
+
+        assertEquals(HttpStatusCode.OK, res.status)
+        val body = res.bodyAsText()
+        assertTrue(body.contains("\"models\""), body.take(200))
+        assertTrue(body.contains("\"provider\""), body.take(200))
+    }
+
     /** 同一道兜底要覆盖写方法，否则前端 POST 一个未实现端点又会拿到 HTML。 */
     @Test
     fun `unimplemented api post also degrades to json`() = testApplication {
-        application { handyModule(tempStaticRoot(), java.io.File("D:/cc-haha/projects")) }
+        application { handyModule(tempStaticRoot(), java.io.File("D:/cc-haha/projects"), java.io.File("D:/cc-haha/cc-haha")) }
 
         val res = client.post("/api/diagnostics/events") {
             setBody("{}")
@@ -164,7 +181,7 @@ class RoutingTest {
     /** 已实现的具体路由不能被兜底抢走。 */
     @Test
     fun `concrete api routes still win over the fallback`() = testApplication {
-        application { handyModule(tempStaticRoot(), java.io.File("D:/cc-haha/projects")) }
+        application { handyModule(tempStaticRoot(), java.io.File("D:/cc-haha/projects"), java.io.File("D:/cc-haha/cc-haha")) }
 
         assertEquals(HttpStatusCode.OK, client.get("/api/status").status)
         assertEquals(HttpStatusCode.OK, client.get("/api/sessions").status)

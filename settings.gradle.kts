@@ -28,3 +28,7 @@ include(":app")
 include(":server")
 // 转录与设置的落盘层：JSONL 是真源，索引可重建。
 include(":persistence")
+// Agent 内核。:kernel-api 放平台无关的契约，:kernel 放主循环 ——
+// 两者都不含 android.*，于是能拿脚本化模型在电脑上直接跑单测。
+include(":kernel-api")
+include(":kernel")
