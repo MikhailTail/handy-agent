@@ -1,0 +1,155 @@
+package dev.mikhailtail.handyagent.server
+
+import io.ktor.http.ContentType
+import io.ktor.http.HttpStatusCode
+import io.ktor.server.application.ApplicationCall
+import io.ktor.util.pipeline.PipelineContext
+// 无参数的 `get { }` 会匹配到旧的 PipelineContext 重载，那里的 call 是扩展属性，
+// 必须显式导入才能解析（带路径的 `get("/x") { }` 用的是 RoutingContext，call 是成员）。
+import io.ktor.server.application.call
+import io.ktor.server.http.content.staticFiles
+import io.ktor.server.request.httpMethod
+import io.ktor.server.request.path
+import io.ktor.server.response.respondText
+import io.ktor.server.routing.Route
+import io.ktor.server.routing.delete
+import io.ktor.server.routing.get
+import io.ktor.server.routing.patch
+import io.ktor.server.routing.post
+import io.ktor.server.routing.put
+import io.ktor.server.routing.route
+import io.ktor.server.websocket.webSocket
+import io.ktor.websocket.Frame
+import io.ktor.websocket.readText
+import io.ktor.websocket.send
+import java.io.File
+
+/** 与 cc-haha `src/server/api/status.ts` 的 `getVersion()` 回退值保持一致。 */
+private const val SERVER_VERSION = "999.0.0-local"
+
+private val startedAt = System.currentTimeMillis()
+
+private suspend fun ApplicationCall.respondJson(body: String) =
+    respondText(body, ContentType.Application.Json)
+
+/**
+ * `GET /health` —— 存活探针。前端与宿主都用它判断服务是否起来了。
+ */
+internal fun Route.healthRoutes() {
+    get("/health") {
+        call.respondJson("""{"status":"ok"}""")
+    }
+}
+
+/**
+ * `/api/status` 系列。
+ *
+ * 字段名逐个对齐 cc-haha 的 `src/server/api/status.ts`：
+ * ```
+ * GET /api/status        → { status, version, uptime }
+ * GET /api/status/user   → { configDir, projects: string[] }
+ * GET /api/status/usage  → { totalInputTokens, totalOutputTokens, totalCost }
+ * ```
+ * 阶段 0 只做只读且恒为空的版本；接入 :persistence 后 `projects` 会是真的目录列表。
+ */
+internal fun Route.statusRoutes() {
+    route("/api/status") {
+        get {
+            val uptime = System.currentTimeMillis() - startedAt
+            call.respondJson(
+                """{"status":"ok","version":"$SERVER_VERSION","uptime":$uptime}""",
+            )
+        }
+        get("/user") {
+            call.respondJson("""{"configDir":"","projects":[]}""")
+        }
+        get("/usage") {
+            call.respondJson(
+                """{"totalInputTokens":0,"totalOutputTokens":0,"totalCost":0}""",
+            )
+        }
+    }
+}
+
+/**
+ * `/api/sessions` —— 阶段 0 恒为空数组。
+ *
+ * 真实实现要等 :persistence 落地（JSONL 转录扫描），在此之前返回空数组比返回
+ * 404 好：前端拿到 `[]` 会正常渲染"还没有会话"，拿到 404 则可能进错误分支。
+ */
+internal fun Route.sessionRoutes() {
+    route("/api/sessions") {
+        get {
+            call.respondJson("[]")
+        }
+    }
+}
+
+/**
+ * `/ws/{sessionId}` —— 前端的事件通道。
+ *
+ * cc-haha 用的是自定义 JSON 事件（不是 JSON-RPC），见 `desktop/src/api/websocket.ts`
+ * 与 `desktop/src/types/chat.ts`。阶段 0 只需连得上、ping 有 pong、断开不炸；
+ * 真正的 `content_delta` / `permission_request` 等事件在阶段 2 接入内核后才有内容。
+ */
+internal fun Route.frontendChannel() {
+    webSocket("/ws/{sessionId}") {
+        val sessionId = call.parameters["sessionId"].orEmpty()
+        send(Frame.Text("""{"type":"connected","sessionId":"$sessionId"}"""))
+        for (frame in incoming) {
+            if (frame !is Frame.Text) continue
+            // 前端每 30s 发一次 ping 保活；不回 pong 会被判为断线并触发重连。
+            if (frame.readText().contains("\"ping\"")) {
+                send(Frame.Text("""{"type":"pong"}"""))
+            }
+        }
+    }
+}
+
+/**
+ * 静态前端 —— 托管 cc-haha 的 `dist/` 产物。
+ *
+ * 这是"前端零改动"方案的另一半：页面与 API 同源，`window.location.origin` 就是
+ * baseUrl，前端自己去 `desktopRuntime.ts` 的同源分支，不需要任何注入。
+ *
+ * `default("index.html")` 提供 SPA 兜底：前端用的是 history 路由，深链接
+ * （如 `/settings`）在服务端没有对应文件，必须回落到 index.html 由前端自己解析。
+ */
+/**
+ * `/api` 下尚未实现路径的兜底。
+ *
+ * 两条铁律，都是踩出来的：
+ *
+ * **1. 绝不返回 HTML。** 前端把所有 `/api` 响应一律按 JSON 解析，拿到 HTML 就报
+ * `The server response could not be parsed as JSON` 并整屏进错误页 —— 而那个提示
+ * 指不出是哪个端点。真机上这个表现跟"服务没起来"几乎一样，定位成本极高。
+ * （我们就是因为缺兜底，前端启动时请求的 9 个端点全落到 SPA 兜底拿到 index.html。）
+ *
+ * **2. 返回 200 + `{}`，而不是 404。** 这对应协议分级里的 `degraded` ——
+ * 前端拿到空对象会用各自的默认值继续渲染，拿到 404 则可能直接进错误分支。
+ * 代价是掩盖了"这个端点还没做"，所以下面打一条日志留痕。
+ *
+ * 已实现的具体路由不受影响：Ktor 按 specificity 选路由，具体路径优先于这个通配。
+ * 将来按 `protocol/api-routes.json` 的分级逐个把它们替换成 real 实现。
+ */
+internal fun Route.apiFallback() {
+    route("/api/{...}") {
+        // Ktor 2.3 的 handler receiver 是 PipelineContext（RoutingContext 是 3.x 的 API）。
+        val degraded: suspend PipelineContext<Unit, ApplicationCall>.(Unit) -> Unit = {
+            val path = call.request.path()
+            println("[degraded] ${call.request.httpMethod.value} $path -> {}")
+            call.respondText("{}", ContentType.Application.Json, HttpStatusCode.OK)
+        }
+        get(degraded)
+        post(degraded)
+        put(degraded)
+        patch(degraded)
+        delete(degraded)
+    }
+}
+
+internal fun Route.staticRoutes(root: File) {
+    staticFiles("/", root) {
+        default("index.html")
+    }
+}

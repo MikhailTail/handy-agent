@@ -20,4 +20,9 @@ dependencyResolutionManagement {
     }
 }
 rootProject.name = "handy-agent"
+
+// 分层对齐 cc-haha：:server 复刻它的 HTTP+WS 服务端，:kernel 复刻 sidecar 的
+// cli 内核。两者都刻意做成**纯 JVM 模块**（不含 android.*），于是绝大多数逻辑
+// 能在电脑上直接跑单测，不必动模拟器 —— 这是移植期最重要的生产力来源。
 include(":app")
+include(":server")

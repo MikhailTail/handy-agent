@@ -1,19 +1,53 @@
 package dev.mikhailtail.handyagent
 
 import android.app.Application
-import dev.mikhailtail.handyagent.platform.AppContainer
+import android.util.Log
+import dev.mikhailtail.handyagent.server.HandyServer
+import java.io.File
+import java.net.ServerSocket
 
 /**
- * 进程级组装根的持有者。
+ * 进程级宿主：把前端产物铺到磁盘，然后拉起本地服务。
  *
- * 用 `by lazy` 而不是在 [onCreate] 里直接 new：Android 只给 onCreate 很短的预算，
- * 任何磁盘/Keystore 访问都应发生在首次真正需要使用 Agent 的时候（ViewModel 的 IO 协程里）。
+ * 这里对应 cc-haha 里 Electron 主进程做的那件事 —— 选端口、起 sidecar、把地址交给
+ * 渲染进程（`desktop/electron/services/serverRuntime.ts`）。差别是 Android 上不需要
+ * 跨进程，服务与界面同进程，但**协议边界照留**，不因为同进程就退化成直接函数调用。
  */
 class HandyApp : Application() {
 
-    val container: AppContainer by lazy { AppContainer(this) }
+    /** 本地服务监听的端口；MainActivity 用它拼 WebView 的地址。 */
+    var serverPort: Int = -1
+        private set
 
     override fun onCreate() {
         super.onCreate()
+
+        val staticRoot = File(filesDir, "h5")
+        H5Assets.ensureExtracted(
+            context = this,
+            assetDir = H5_ASSET_DIR,
+            target = staticRoot,
+            version = BuildConfig.VERSION_NAME,
+        )
+
+        val port = pickLoopbackPort()
+        HandyServer(staticRoot = staticRoot, port = port).start()
+        serverPort = port
+
+        Log.i(TAG, "local server listening on http://127.0.0.1:$port/ (static: $staticRoot)")
+    }
+
+    /**
+     * 由系统分配一个空闲端口。
+     *
+     * 不写死 3456（cc-haha 的默认值）：loopback 端口是全设备共享的，任何 App 都可能
+     * 占用，写死会在那些设备上直接起不来。系统分配后再交给 Ktor 使用，中间存在极小的
+     * 竞态窗口，但实践中可忽略；真撞上了 Ktor 会抛错，比静默失败好定位。
+     */
+    private fun pickLoopbackPort(): Int = ServerSocket(0).use { it.localPort }
+
+    private companion object {
+        const val TAG = "HandyApp"
+        const val H5_ASSET_DIR = "h5"
     }
 }

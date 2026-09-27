@@ -1,5 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="app_name">Handy Agent</string>
+
+    <!-- 无障碍服务的文案，阶段 5 启用该服务时生效。 -->
     <string name="accessibility_service_label">Handy Agent 设备操作</string>
     <string name="accessibility_service_summary">让 Agent 读取屏幕内容并模拟点击、滑动与输入</string>
     <string name="accessibility_service_description">

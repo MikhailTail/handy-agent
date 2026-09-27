@@ -1,48 +1,74 @@
 package dev.mikhailtail.handyagent
 
 import android.os.Bundle
+import android.webkit.WebView
+import android.webkit.WebViewClient
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
-import androidx.compose.runtime.CompositionLocalProvider
-import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.remember
-import androidx.lifecycle.viewmodel.compose.viewModel
-import dev.mikhailtail.handyagent.core.platform.FileImageBytesStore
-import dev.mikhailtail.handyagent.ui.AgentViewModel
-import dev.mikhailtail.handyagent.ui.RootScaffold
-import dev.mikhailtail.handyagent.ui.image.LocalImageStore
-import dev.mikhailtail.handyagent.ui.theme.HandyTheme
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.viewinterop.AndroidView
 
 /**
- * 唯一 Activity：整个界面在 Compose 里。
+ * Compose 壳 + WebView 聊天区。
  *
- * 只做三件事：取到进程级 [dev.mikhailtail.handyagent.platform.AppContainer]、把 [AgentViewModel]
- * 作为状态宿主、套上主题后交给 [RootScaffold]。任何会话/审批/存储逻辑都不在这里。
+ * 分工按既定方案：**聊天/会话/设置这些由 cc-haha 自己的 React 界面承担**（原版产物，
+ * 零改动），而我们自己的原生界面（终端、预览、worktree）以后挂在 WebView 之外。
+ * 所以这里先只有一层全屏 WebView，将来的导航骨架会套在它外面。
  */
 class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        val port = (application as HandyApp).serverPort
+
         setContent {
-            val vm: AgentViewModel = viewModel()
-            // 图片字节存储：时间轴与审批卡都要显示截图。用 CompositionLocal 提供，
-            // 免得把 store 一路透传到每个渲染函数。
-            val imageStore = remember(vm.container) {
-                FileImageBytesStore(vm.container.layout.images)
-            }
-            // 主题跟着 AppContainer 里的 Flow 走，设置页一改整个界面立刻重组
-            val themeId by vm.container.theme.collectAsState()
-            HandyTheme(themeId = themeId) {
-                CompositionLocalProvider(LocalImageStore provides imageStore) {
-                    RootScaffold(
-                        container = vm.container,
-                        controller = vm.controller,
-                        onStart = vm::startOnce,
-                        themeId = themeId,
-                    )
+            MaterialTheme {
+                Surface(modifier = Modifier.fillMaxSize()) {
+                    if (port > 0) {
+                        HandyWebView(port = port)
+                    } else {
+                        // 服务没起来就别给个白屏，直接把原因摆出来。
+                        Box(
+                            modifier = Modifier.fillMaxSize(),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Text("本地服务未能启动（端口 $port）")
+                        }
+                    }
                 }
             }
         }
     }
+}
+
+@Composable
+private fun HandyWebView(port: Int) {
+    AndroidView(
+        modifier = Modifier.fillMaxSize(),
+        factory = { context ->
+            WebView(context).apply {
+                settings.apply {
+                    javaScriptEnabled = true
+                    // cc-haha 前端的 Zustand store 会往 localStorage 持久化，
+                    // 关掉它会让设置项在重启后丢失。
+                    domStorageEnabled = true
+                    allowFileAccess = false
+                    allowContentAccess = false
+                    mediaPlaybackRequiresUserGesture = false
+                }
+                // 必须装 WebViewClient，否则页面里的链接会被丢给系统浏览器打开。
+                webViewClient = WebViewClient()
+                // 用 127.0.0.1 而不是 localhost：前端的同源判定拿的是
+                // window.location.origin，混用这两个字面量会被当成跨 origin。
+                loadUrl("http://127.0.0.1:$port/")
+            }
+        },
+    )
 }
