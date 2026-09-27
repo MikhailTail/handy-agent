@@ -20,8 +20,8 @@ android {
         applicationId = "dev.mikhailtail.handyagent"
         minSdk = 30
         targetSdk = 36
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = 2
+        versionName = "0.1.1"
     }
 
     buildFeatures { compose = true }
@@ -52,7 +52,7 @@ android {
 
     buildTypes {
         release {
-            // 0.1.0 暂不开混淆：release 构建路径尚未在真机验证，先求稳。
+            // 暂不开混淆：release 构建路径尚未在真机验证，先求稳。
             // 后续确认稳定后可改为 true，包体会进一步减小。
             isMinifyEnabled = false
             isShrinkResources = false
