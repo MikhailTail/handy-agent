@@ -52,6 +52,9 @@ class MainActivity : ComponentActivity() {
     /** 捕获到的 JS 报错数量。有错时界面顶部给出可复制的诊断入口。 */
     private var jsErrorCount by mutableStateOf(0)
 
+    /** 环境自检报告。样式异常时自动展示，内容可复制。 */
+    private var envReport by mutableStateOf<String?>(null)
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         storageGranted = StorageAccess.granted(this)
@@ -74,9 +77,17 @@ class MainActivity : ComponentActivity() {
                             if (!WebViewCompat.isAdequate()) {
                                 WebViewOutdatedBanner(version = WebViewCompat.version())
                             }
-                            HandyWebView(port = port, onJsError = { jsErrorCount = it })
+                            HandyWebView(
+                                port = port,
+                                onJsError = { jsErrorCount = it },
+                                onEnvReport = { envReport = it },
+                            )
                             if (jsErrorCount > 0) {
                                 JsErrorPanel(count = jsErrorCount)
+                            }
+                            // 只在自检发现问题时才展示 —— 正常情况下不打扰。
+                            envReport?.takeIf { EnvProbe.looksBroken(it) }?.let { report ->
+                                EnvReportPanel(report = report, onDismiss = { envReport = null })
                             }
                         }
 
@@ -202,6 +213,63 @@ private fun WebViewOutdatedBanner(version: String) {
 }
 
 /**
+ * 环境自检报告浮层。
+ *
+ * 只在页面渲染后自动弹一次，把"决定界面能不能正常显示"的事实摆出来：
+ * WebView 版本、各项 CSS 特性支持、主题变量是否生效、样式表加载量。
+ *
+ * **做这个是因为我复现不出用户的问题** —— 同样的页面在开发机上一切正常，
+ * 只能靠运行时环境本身说明差异。用户一复制，我就能定位，不必再来回猜。
+ */
+@Composable
+private fun EnvReportPanel(report: String, onDismiss: () -> Unit) {
+    val context = LocalContext.current
+    var expanded by remember { mutableStateOf(false) }
+
+    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.BottomCenter) {
+        Surface(
+            color = MaterialTheme.colorScheme.tertiaryContainer,
+            modifier = Modifier.fillMaxWidth().padding(8.dp),
+        ) {
+            Column(
+                modifier = Modifier.padding(12.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                Text(
+                    "环境自检（界面若显示异常，请复制这段发给开发者）",
+                    style = MaterialTheme.typography.labelLarge,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                if (expanded) {
+                    Column(
+                        modifier = Modifier
+                            .verticalScroll(rememberScrollState())
+                            .padding(vertical = 4.dp),
+                    ) {
+                        Text(report, style = MaterialTheme.typography.bodySmall)
+                    }
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    TextButton(onClick = { expanded = !expanded }) {
+                        Text(if (expanded) "收起" else "展开")
+                    }
+                    TextButton(
+                        onClick = {
+                            val cm = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE)
+                                as android.content.ClipboardManager
+                            cm.setPrimaryClip(
+                                android.content.ClipData.newPlainText("handy-agent-env", report),
+                            )
+                        },
+                    ) { Text("复制") }
+                    TextButton(onClick = onDismiss) { Text("关闭") }
+                }
+            }
+        }
+    }
+}
+
+/**
  * JS 报错浮层。
  *
  * 前端是原版产物不能改，它在手机上出错时只弹一句 toast —— 连调用栈都没有，
@@ -269,7 +337,11 @@ private fun CenterMessage(text: String) {
 }
 
 @Composable
-private fun HandyWebView(port: Int, onJsError: (Int) -> Unit = {}) {
+private fun HandyWebView(
+    port: Int,
+    onJsError: (Int) -> Unit = {},
+    onEnvReport: (String) -> Unit = {},
+) {
     AndroidView(
         modifier = Modifier.fillMaxSize(),
         factory = { context ->
@@ -298,6 +370,13 @@ private fun HandyWebView(port: Int, onJsError: (Int) -> Unit = {}) {
                         super.onPageStarted(view, url, favicon)
                         // 尽早注入兜底样式：等样式算完再补会先闪一下塌陷的布局。
                         view?.let { WebViewCompat.install(it) }
+                    }
+
+                    override fun onPageFinished(view: WebView?, url: String?) {
+                        super.onPageFinished(view, url)
+                        // 页面渲染之后再自检：样式若整体失效，界面会呈现
+                        // "透明背景 + 只剩黑字"，而这类失败无法从代码看出来。
+                        view?.let { wv -> wv.postDelayed({ EnvProbe.run(wv, onEnvReport) }, 1500) }
                     }
                 }
                 // 用 127.0.0.1 而不是 localhost：前端的同源判定拿的是
