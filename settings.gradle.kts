@@ -19,5 +19,5 @@ dependencyResolutionManagement {
         mavenCentral()
     }
 }
-rootProject.name = "cc-haha-mobile"
+rootProject.name = "handy-agent"
 include(":app")
