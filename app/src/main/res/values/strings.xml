@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="accessibility_service_label">Handy Agent 设备操作</string>
+    <string name="accessibility_service_summary">让 Agent 读取屏幕内容并模拟点击、滑动与输入</string>
+    <string name="accessibility_service_description">
+        开启后，Agent 才能"看见"屏幕上的控件并代替你点击、滑动、输入。\n\n
+        每一次点击/滑动/输入都会先弹出审批卡，你确认后才会真正执行。\n\n
+        遇到受保护界面（银行、支付等带有 FLAG_SECURE 的窗口）时会自动停止并交还给你。
+    </string>
+</resources>

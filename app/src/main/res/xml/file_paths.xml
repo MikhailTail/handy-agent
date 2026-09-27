@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  分享出口只授权缓存里的 exports/ 一个目录：
+  即便 FileProvider 被误用，也拿不到 workspace、skills、plugins 或 Keystore 数据。
+-->
+<paths>
+    <cache-path name="exports" path="exports/" />
+</paths>

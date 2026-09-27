@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  无障碍服务能力声明。
+
+  四项能力缺一不可：
+  - canRetrieveWindowContent  读控件树（感知的基础）
+  - canPerformGestures        分发点击/滑动手势
+  - canTakeScreenshot         截屏（API 30+；受限 353ms 一次）
+  - flagRetrieveInteractiveWindows  拿得到通知栏 / 输入法等非活动窗口
+
+  accessibilityEventTypes 只订阅窗口级事件：全量订阅（typeAllMask）在真机上
+  会带来明显耗电，而我们只需要"当前是哪个 App / 界面有没有变"。
+-->
+<accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
+    android:accessibilityEventTypes="typeWindowStateChanged|typeWindowContentChanged"
+    android:accessibilityFeedbackType="feedbackGeneric"
+    android:accessibilityFlags="flagDefault|flagRetrieveInteractiveWindows|flagReportViewIds|flagIncludeNotImportantViews"
+    android:canPerformGestures="true"
+    android:canRetrieveWindowContent="true"
+    android:canTakeScreenshot="true"
+    android:description="@string/accessibility_service_description"
+    android:notificationTimeout="100"
+    android:summary="@string/accessibility_service_summary" />
