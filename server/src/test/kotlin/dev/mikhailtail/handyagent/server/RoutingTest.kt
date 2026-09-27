@@ -150,20 +150,34 @@ class RoutingTest {
     }
 
     /**
-     * 未实现的**列表型**接口要返回 `[]` 而不是 `{}`。
+     * 未实现接口的空形态**必须带键**，且键名要与 cc-haha 实测的一致。
      *
-     * 前端有一大批接口按数组消费（`/api/teams`、`/api/skills`…），拿到对象会在
-     * `.map` 上直接抛错、整页白屏。这类"看起来有界面、一点就崩"的现象，根因就在这里 ——
-     * 用户报"感觉只做了前端"时，第一处该查的就是这条。
+     * 这里我犯过一次方向性错误：起初按"接口语义像不像集合"给 `/api/teams` 返回 `[]`，
+     * 结果前端整页崩 —— 它们**全都是包在对象里的**（`{"teams":[...]}`）。
+     * 空形态的唯一依据是实测结构，不是接口名字的语义。
      */
     @Test
-    fun `unimplemented list endpoints degrade to an empty array`() = testApplication {
+    fun `unimplemented endpoints degrade to keyed objects matching cc-haha`() = testApplication {
         application { handyModule(tempStaticRoot(), java.io.File("D:/cc-haha/projects"), java.io.File("D:/cc-haha/cc-haha")) }
 
-        for (path in listOf("/api/teams", "/api/adapters", "/api/skills", "/api/scheduled-tasks")) {
-            val res = client.get(path)
-            assertEquals(HttpStatusCode.OK, res.status, path)
-            assertEquals("[]", res.bodyAsText().trim(), "$path 应返回空数组")
+        val expected = mapOf(
+            "/api/teams" to "\"teams\"",
+            "/api/skills" to "\"skills\"",
+            "/api/mcp" to "\"servers\"",
+            "/api/connectors" to "\"items\"",
+            "/api/tasks" to "\"tasks\"",
+            "/api/scheduled-tasks" to "\"tasks\"",
+            "/api/scheduled-tasks/runs" to "\"runs\"",
+            "/api/traces" to "\"traces\"",
+            "/api/computer-use/apps" to "\"apps\"",
+            "/api/open-targets" to "\"targets\"",
+            "/api/sessions/recent-projects" to "\"projects\"",
+        )
+
+        for ((path, key) in expected) {
+            val body = client.get(path).bodyAsText()
+            assertTrue(body.trimStart().startsWith("{"), "$path 应返回对象，实际：$body")
+            assertTrue(body.contains(key), "$path 应含键 $key，实际：$body")
         }
     }
 

@@ -54,6 +54,30 @@ internal fun Route.sessionsApi(projectsDir: File) {
             )
         }
 
+        /**
+         * 这几个**必须显式注册**，否则会被下面的 `/{id}` 当成会话 id 吞掉 ——
+         * 表现为 `/api/sessions/recent-projects` 返回 "session not found"。
+         * Ktor 的静态段确实优先于参数段，但那只在**两者都已注册**时成立；
+         * 没注册的路径会一路落到 `/{id}`。
+         */
+        get("/recent-projects") {
+            val sessions = scanner.listSessions()
+            // 按项目分组，最近活跃的在前。字段名对齐 cc-haha 的 {"projects":[...]}。
+            val byProject = sessions.groupBy { it.projectPath }
+                .map { (path, items) ->
+                    buildJsonObject {
+                        put("projectPath", JsonPrimitive(items.firstOrNull()?.projectRoot ?: path))
+                        put("sessionCount", JsonPrimitive(items.size))
+                        put("lastActiveAt", JsonPrimitive(items.maxOfOrNull { it.modifiedAt } ?: ""))
+                    }
+                }
+            call.respondJsonRaw(buildJsonObject { put("projects", JsonArray(byProject)) }.toString())
+        }
+
+        get("/project-history") {
+            call.respondJsonRaw("""{"projects":[]}""")
+        }
+
         get("/{id}/messages") {
             val id = call.parameters["id"].orEmpty()
             val session = scanner.findSession(id)

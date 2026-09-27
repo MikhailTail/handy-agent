@@ -34,7 +34,11 @@ internal fun Route.settingsRoutes(configDir: File, permissionModeHolder: Permiss
 
     route("/api/settings/user") {
         get {
-            call.respondJsonRaw(readSettings(configDir).toString())
+            // **必须用 JsonObject 包一层再序列化。** `Map.toString()` 输出的是
+            // `{key=value}` 这种 Kotlin 调试格式，不是 JSON —— 前端 JSON.parse 会失败，
+            // 而 AppShell 的启动流程把 fetchAll 里的任何 reject 当成"服务启动失败"，
+            // 于是整屏进错误页。这个坑很隐蔽：类型上 Map 和 JsonObject 都是"对象"。
+            call.respondJsonRaw(JsonObject(readSettings(configDir)).toString())
         }
         put {
             val input = call.receiveJsonObject()

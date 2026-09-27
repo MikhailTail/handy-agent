@@ -179,34 +179,54 @@ internal fun Route.apiFallback() {
 }
 
 /**
- * 未实现路径的**空形态**。
+ * 未实现路径的**空形态** —— 键名逐个照抄 cc-haha 的真实返回。
  *
- * 一律返回 `{}` 是不够的 —— 前端有一大批接口按数组消费（`/api/teams`、`/api/adapters`、
- * `/api/skills`…），拿到对象会在 `.map` 上直接抛错，整个页面白屏。
- * 这类"看起来有界面、一点就崩"的现象，根因往往就在这里。
+ * **这里我犯过一次方向性错误，值得记下来。** 起初按"接口语义像不像列表"来判断，
+ * 给 `/api/teams`、`/api/skills`、`/api/mcp` 之流返回 `[]`。结果前端整页崩：
+ * 它们**全都是包在对象里的** —— `{"teams":[...]}`、`{"skills":[...]}`、`{"servers":[...]}`。
  *
- * 名单按前端 api 目录下各文件的实际用法整理。**判断依据是"前端把它当数组还是对象"**，
- * 不是接口的语义 —— 语义上像列表但前端当对象用的，要跟着前端走。
+ * 教训：**空形态的唯一依据是实测的返回结构，不是接口名字的语义。**
+ * "teams 是个集合所以返回数组"这种推理听着合理，但服务端就是包了一层。
+ * 下面每一条都是拿活的 cc-haha（127.0.0.1:58104）逐个 curl 出来的。
  */
 private fun emptyShapeFor(path: String): String {
     val p = path.trimEnd('/')
-    val listLike = listOf(
-        "/api/adapters", "/api/agents", "/api/connectors", "/api/mcp", "/api/plugins",
-        "/api/skills", "/api/teams", "/api/workflows", "/api/tasks", "/api/tasks/lists",
-        "/api/scheduled-tasks", "/api/traces", "/api/public-access", "/api/market/skills",
-        "/api/session-collaboration", "/api/computer-use/apps",
-        "/api/computer-use/authorized-apps", "/api/open-targets",
-        "/api/sessions/recent-projects", "/api/sessions/project-history",
-    )
-    if (listLike.any { p == it || p.startsWith("$it/") }) return "[]"
-
-    // 少数接口前端直接读顶层字段，给个带键的空对象比裸 `{}` 更安全。
     return when {
-        p.startsWith("/api/diagnostics") -> """{"events":[],"status":"ok"}"""
+        // ── 带键对象（实测）────────────────────────────────────────────
+        p == "/api/teams" -> """{"teams":[]}"""
+        p == "/api/skills" -> """{"skills":[]}"""
+        p == "/api/mcp" -> """{"servers":[]}"""
+        p.startsWith("/api/mcp/") -> "{}"
+        p == "/api/plugins" -> """{"plugins":[],"marketplaces":[],"summary":{"total":0,"enabled":0,"errorCount":0}}"""
+        p == "/api/connectors" -> """{"items":[]}"""
+        p == "/api/adapters" -> "{}"
+        p == "/api/agents" -> """{"availableTools":[],"agents":[]}"""
+        p == "/api/tasks" -> """{"tasks":[]}"""
+        p == "/api/tasks/lists" -> """{"lists":[]}"""
+        p.startsWith("/api/tasks/lists/") -> """{"tasks":[]}"""
+        p == "/api/workflows" -> """{"workflows":[]}"""
+        p == "/api/scheduled-tasks" -> """{"tasks":[]}"""
+        p == "/api/scheduled-tasks/runs" -> """{"runs":[]}"""
+        p.startsWith("/api/scheduled-tasks/") -> "{}"
+        p == "/api/traces" -> """{"traces":[],"total":0}"""
+        p == "/api/traces/settings" -> """{"enabled":false,"storageDir":""}"""
+        p.startsWith("/api/market/skills") -> """{"items":[]}"""
+        p == "/api/session-collaboration" -> """{"sessions":[]}"""
+        p == "/api/computer-use/apps" -> """{"apps":[]}"""
+        p == "/api/computer-use/authorized-apps" -> """{"apps":[]}"""
+        p == "/api/computer-use/status" -> """{"available":false,"enabled":false}"""
+        p == "/api/open-targets" -> """{"platform":"android","targets":[]}"""
+        p == "/api/sessions/recent-projects" -> """{"projects":[]}"""
+        p == "/api/sessions/project-history" -> """{"projects":[]}"""
+
+        // ── 其余（含 /api/diagnostics/*）──────────────────────────────
+        p.startsWith("/api/diagnostics") -> """{"events":[]}"""
         p == "/api/models" -> """{"models":[],"provider":null}"""
         p == "/api/models/current" -> """{"model":null}"""
         p == "/api/permissions/mode" -> """{"mode":"default"}"""
         p == "/api/filesystem/browse" -> """{"entries":[],"path":""}"""
+        p == "/api/h5-access" -> """{"settings":{},"diagnostics":{}}"""
+        p == "/api/memory/files" -> """{"files":[]}"""
         p == "/api/search/sessions" -> """{"results":[],"total":0}"""
         else -> "{}"
     }
