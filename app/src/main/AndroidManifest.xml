@@ -1,8 +1,24 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
 
     <!-- WebView 要访问本机的 127.0.0.1 服务，即使是 loopback 也需要 INTERNET。 -->
     <uses-permission android:name="android.permission.INTERNET" />
+
+    <!--
+      全盘文件访问 —— 用户明确选择的能力，Agent 要能读写手机的任意位置
+      （照片、下载、文档），这正是它存在的意义。
+
+      代价与约束：
+      - Android 11+ 需要在「设置 → 应用 → 特殊应用权限 → 所有文件访问权限」手动开启，
+        Environment.isExternalStorageManager() 为 false 时文件工具会失败，
+        所以在能力体检页要有引导（尚未实现）。
+      - Play 商店对 MANAGE_EXTERNAL_STORAGE 审核极严（基本只给文件管理器类应用），
+        侧载分发不受影响。
+    -->
+    <uses-permission
+        android:name="android.permission.MANAGE_EXTERNAL_STORAGE"
+        tools:ignore="ScopedStorage" />
 
     <application
         android:name=".HandyApp"
